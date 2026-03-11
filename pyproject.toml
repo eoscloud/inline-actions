@@ -1,0 +1,15 @@
+[project]
+name = "inline-actions"
+version = "0.1.0"
+description = "Statically inlines composite GitHub Actions into workflow files"
+requires-python = ">=3.11"
+dependencies = [
+    "ruamel.yaml",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+inline-actions = "inline_actions:main"

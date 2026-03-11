@@ -1,0 +1,76 @@
+name: ci
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-inline:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: setup python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+
+    - name: install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: install inline-actions
+      run: uv sync
+
+    - name: create test workflow source
+      run: |
+        mkdir -p .test/workflow-sources
+        cat > .test/workflow-sources/test.yaml << 'WORKFLOW'
+        name: test-tailscale
+        on:
+          push:
+            branches:
+              - main
+
+        jobs:
+          connect:
+            runs-on: ubuntu-latest
+            steps:
+            - uses: actions/checkout@v6
+            - name: connect to tailscale
+              uses: https://github.com/tailscale/github-action@v3
+              with:
+                oauth-client-id: fake-client-id
+                oauth-secret: fake-secret
+                tags: tag:ci
+        WORKFLOW
+
+    - name: run inline-actions
+      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows
+
+    - name: verify output exists
+      run: test -f .test/workflows/test.yaml
+
+    - name: verify composite action was inlined
+      run: |
+        # The output should NOT contain the original uses: reference to tailscale/github-action
+        if grep -q 'uses:.*tailscale/github-action' .test/workflows/test.yaml; then
+          echo "FAIL: tailscale/github-action uses: reference was not inlined"
+          cat .test/workflows/test.yaml
+          exit 1
+        fi
+        # The output should contain inlined steps (e.g. tailscale-related commands)
+        echo "PASS: composite action was successfully inlined"
+        echo "--- Generated workflow ---"
+        cat .test/workflows/test.yaml
+
+    - name: verify metadata file
+      run: |
+        # Remote action metadata should have been generated
+        if [ -f .test/inline-actions/actions.yaml ]; then
+          echo "Metadata file generated:"
+          cat .test/inline-actions/actions.yaml
+        else
+          echo "FAIL: metadata file was not generated"
+          exit 1
+        fi

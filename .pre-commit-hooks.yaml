@@ -1,0 +1,6 @@
+- id: inline-actions
+  name: Inline composite GitHub Actions
+  language: python
+  entry: inline-actions
+  files: \.ya?ml$
+  pass_filenames: false

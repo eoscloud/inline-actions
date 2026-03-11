@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+
+# uv
+.uv/
+
+# Ruff cache
+.ruff_cache/
+
+# Claude Code
+.claude/settings.local.json
+.claude/memory/
