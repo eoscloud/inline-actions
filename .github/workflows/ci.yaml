@@ -25,11 +25,12 @@ jobs:
       run: uv sync --group dev
 
     - name: run unit tests
-      run: uv run pytest --cov-report=xml --cov-report=json --cov-report=term-missing --junitxml=test-results.xml
+      run: uv run pytest --cov --cov-branch --cov-report=xml
 
-    - name: generate coverage badge
-      if: github.ref == 'refs/heads/main' && always()
-      uses: we-cli/coverage-badge-action@main
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
 
   test-inline:
     runs-on: ubuntu-latest
