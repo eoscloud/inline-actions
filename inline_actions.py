@@ -39,6 +39,11 @@ def _make_yaml() -> YAML:
     return y
 
 
+def _strip_trailing_whitespace(text: str) -> str:
+    """Remove trailing whitespace from each line in *text*."""
+    return "\n".join(line.rstrip() for line in text.split("\n"))
+
+
 # ---------------------------------------------------------------------------
 # Remote uses: parsing
 # ---------------------------------------------------------------------------
@@ -481,9 +486,11 @@ def write_metadata(output_dir: Path, tracker: RemoteActionTracker) -> None:
         "# at the listed checkout_path for the generated workflows to work.\n"
     )
 
+    yaml_content = _strip_trailing_whitespace(buf.getvalue())
+
     with open(metadata_file, "w") as f:
         f.write(header)
-        f.write(buf.getvalue())
+        f.write(yaml_content)
 
     print(f"  metadata -> {metadata_file}")
 
@@ -607,7 +614,7 @@ def process_file(
 
     buf = StringIO()
     y.dump(processed, buf)
-    yaml_content = buf.getvalue()
+    yaml_content = _strip_trailing_whitespace(buf.getvalue())
 
     with open(output_file, "w") as f:
         f.write(header)
