@@ -28,7 +28,7 @@ from ruamel.yaml.scalarstring import (
     ScalarString,
 )
 
-INLINE_ACTIONS_DIR = ".github/inline-actions"
+DEFAULT_INLINE_ACTIONS_DIR = ".github/inline-actions"
 
 
 def _make_yaml() -> YAML:
@@ -263,6 +263,7 @@ def resolve_remote_action(
     uses: str,
     git_resolver: GitActionResolver,
     tracker: RemoteActionTracker,
+    inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
 ) -> tuple[Path, str] | None:
     """Resolve a URL-based `uses:` to (action_dir_on_disk, workspace_relative_path).
 
@@ -280,7 +281,7 @@ def resolve_remote_action(
 
     # Derive workspace-relative checkout path from repo URL + ref
     identifier = repo_url_to_identifier(repo_url, ref)
-    checkout_base = f"{INLINE_ACTIONS_DIR}/{identifier}"
+    checkout_base = f"{inline_actions_dir}/{identifier}"
     workspace_path = f"{checkout_base}/{subpath}" if subpath else checkout_base
 
     tracker.record(repo_url, ref, checkout_base)
@@ -393,6 +394,7 @@ def inline_step(
     step: dict,
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
+    inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
 ) -> list[dict]:
     """Inline a single step if it uses a composite action, else return as-is."""
     uses = step.get("uses")
@@ -406,7 +408,9 @@ def inline_step(
 
     # Try remote resolution
     if resolved is None and git_resolver is not None:
-        resolved = resolve_remote_action(uses_str, git_resolver, tracker)
+        resolved = resolve_remote_action(
+            uses_str, git_resolver, tracker, inline_actions_dir
+        )
 
     if resolved is None:
         return [step]
@@ -424,6 +428,7 @@ def process_workflow(
     workflow: dict,
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
+    inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
 ) -> dict:
     """Process a workflow, inlining all composite action references."""
     workflow = copy.deepcopy(workflow)
@@ -433,7 +438,9 @@ def process_workflow(
         steps = job.get("steps", [])
         new_steps: list[dict] = []
         for step in steps:
-            new_steps.extend(inline_step(step, git_resolver, tracker))
+            new_steps.extend(
+                inline_step(step, git_resolver, tracker, inline_actions_dir)
+            )
         job["steps"] = new_steps
 
     return workflow
@@ -574,6 +581,7 @@ def process_file(
     output_dir: Path,
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
+    inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
 ) -> None:
     """Process a single workflow file."""
     y = _make_yaml()
@@ -588,7 +596,7 @@ def process_file(
         )
         return
 
-    processed = process_workflow(workflow, git_resolver, tracker)
+    processed = process_workflow(workflow, git_resolver, tracker, inline_actions_dir)
 
     rel_path = source_file.relative_to(source_dir)
     source_ref = f"{source_dir_rel}/{rel_path}"
@@ -650,6 +658,9 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
 
+    # Derive inline-actions directory from output directory
+    inline_actions_dir = str(output_dir.parent / "inline-actions")
+
     print(f"Processing {len(source_files)} workflow(s):")
     for source_file in source_files:
         process_file(
@@ -659,6 +670,7 @@ def main(argv: list[str] | None = None) -> None:
             output_dir,
             git_resolver,
             tracker,
+            inline_actions_dir,
         )
 
     write_metadata(output_dir, tracker)
