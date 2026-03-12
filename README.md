@@ -61,6 +61,7 @@ uv run inline-actions \
 | `--git-ssh DOMAIN` | | Use SSH (`git@host:path`) instead of HTTPS when cloning from this domain (repeatable) |
 | `--git-cache-dir DIR` | temporary directory | Directory to cache cloned repos |
 | `--no-vendor` | | Disable vendoring of remote action sources (see [Vendoring](#vendoring)) |
+| `--frozen` | | Use exact revisions from the lock file instead of resolving refs (see [Lock File](#lock-file)) |
 
 ### Local Actions
 
@@ -103,22 +104,39 @@ The option is repeatable — use multiple `--git-ssh` flags for different domain
 
 In both cases, the tool replaces each composite action step's `${{ inputs.X }}` with resolved values and `${{ env.GITHUB_ACTION_PATH }}` with the workspace-relative path.
 
-### Metadata
+### Lock File
 
-When remote actions are used, the tool writes `.github/inline-actions/actions.yaml` alongside the generated workflows. This file acts as a lockfile: it records exactly which repositories at which versions must be checked out and where.
+When remote actions are used, the tool writes `.github/inline-actions/actions.yaml` — the **lock file**. It records the exact repository URL, ref, checkout path, and the **pinned revision** (commit SHA) for every remote action:
 
 ```yaml
 github.com/tailscale/github-action@v3:
   url: https://github.com/tailscale/github-action
   ref: v3
   checkout_path: .github/inline-actions/github.com/tailscale/github-action@v3
-github.com/tailscale/github-action@v2:
-  url: https://github.com/tailscale/github-action
-  ref: v2
-  checkout_path: .github/inline-actions/github.com/tailscale/github-action@v2
+  revision: abc123def456789...
 ```
 
-The same repo may appear multiple times at different refs if different workflows pin to different versions. This metadata should be committed to the consumer repo and can be consumed by tooling to generate the required checkout steps.
+The same repo may appear multiple times at different refs if different workflows pin to different versions. The lock file should be committed to the consumer repo.
+
+#### Frozen mode
+
+Pass `--frozen` to clone at the **exact revision** recorded in the lock file instead of whatever the ref (e.g. `v3`) currently points to. This guarantees reproducible builds — the vendored code and generated workflows will be identical across runs, even if the upstream tag has moved.
+
+```bash
+uv run inline-actions --frozen
+```
+
+`--frozen` requires an existing lock file with `revision` entries for all remote actions. If an action is missing or has no revision, inline-actions exits with an error.
+
+#### Updating revisions
+
+To update the lock file with the latest commits that the refs point to, run **without** `--frozen`:
+
+```bash
+uv run inline-actions
+```
+
+This resolves each ref to its current commit SHA and writes the updated revisions to the lock file. Review the diff and commit the result.
 
 ### Vendoring
 
@@ -146,6 +164,8 @@ All other expressions (`${{ github.* }}`, `${{ secrets.* }}`, `${{ steps.* }}`, 
 ## Pre-commit Hook
 
 This tool can be used as a [pre-commit](https://pre-commit.com/) hook in consumer repos.
+
+The hook runs with `--frozen` by default, so it uses the exact revisions from the committed lock file rather than resolving refs to their latest commits. This ensures pre-commit runs are reproducible and don't silently pull in upstream changes.
 
 Add to your `.pre-commit-config.yaml`:
 
@@ -177,6 +197,14 @@ To disable vendoring in the pre-commit hook:
       args:
         - --no-vendor
 ```
+
+To update the lock file with fresh revisions, run inline-actions directly (without `--frozen`):
+
+```bash
+uv run inline-actions
+```
+
+Then commit the updated lock file and vendored sources.
 
 For workflows using local `uses: ./` references, the referenced actions must be present in the same repository.
 

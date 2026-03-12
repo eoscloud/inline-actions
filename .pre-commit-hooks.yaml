@@ -1,6 +1,6 @@
 - id: inline-actions
   name: Inline composite GitHub Actions
   language: python
-  entry: inline-actions
+  entry: inline-actions --frozen
   files: \.ya?ml$
   pass_filenames: false

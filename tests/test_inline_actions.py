@@ -163,6 +163,18 @@ class TestRemoteActionTracker:
         tracker.record("https://github.com/a/b", "v1", "new")
         assert tracker.entries["github.com/a/b@v1"]["checkout_path"] == "new"
 
+    def test_record_with_revision(self):
+        tracker = mod.RemoteActionTracker()
+        tracker.record("https://github.com/a/b", "v1", "p1", "abc123")
+        entry = tracker.entries["github.com/a/b@v1"]
+        assert entry["revision"] == "abc123"
+
+    def test_record_without_revision_omits_key(self):
+        tracker = mod.RemoteActionTracker()
+        tracker.record("https://github.com/a/b", "v1", "p1")
+        entry = tracker.entries["github.com/a/b@v1"]
+        assert "revision" not in entry
+
 
 # ---------------------------------------------------------------------------
 # parse_args
@@ -177,6 +189,7 @@ class TestParseArgs:
         assert args.git_ssh == []
         assert args.git_cache_dir is None
         assert args.no_vendor is False
+        assert args.frozen is False
 
     def test_custom_dirs(self):
         args = mod.parse_args(["--source-dir", "/src", "--output-dir", "/out"])
@@ -194,6 +207,10 @@ class TestParseArgs:
     def test_git_cache_dir(self):
         args = mod.parse_args(["--git-cache-dir", "/cache"])
         assert args.git_cache_dir == Path("/cache")
+
+    def test_frozen_flag(self):
+        args = mod.parse_args(["--frozen"])
+        assert args.frozen is True
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +618,84 @@ class TestResolveRemoteAction:
         )
         assert result is None
 
+    def test_frozen_uses_locked_revision(self, tmp_path):
+        action_dir = tmp_path / "action"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = action_dir
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1", resolver, tracker, locked_entries=locked
+        )
+        assert result is not None
+        # Resolver should be called with the locked revision
+        resolver.resolve.assert_called_once_with(
+            "https://github.com/owner/repo", "", "v1", "locked_sha"
+        )
+        # Tracker should record the locked revision
+        assert tracker.entries["github.com/owner/repo@v1"]["revision"] == "locked_sha"
+
+    def test_frozen_missing_entry_exits(self):
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+        locked = {}  # empty lock file
+        with pytest.raises(SystemExit) as exc_info:
+            mod.resolve_remote_action(
+                "https://github.com/owner/repo@v1",
+                resolver,
+                tracker,
+                locked_entries=locked,
+            )
+        assert exc_info.value.code == 1
+
+    def test_frozen_missing_revision_exits(self):
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": "path",
+            }
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            mod.resolve_remote_action(
+                "https://github.com/owner/repo@v1",
+                resolver,
+                tracker,
+                locked_entries=locked,
+            )
+        assert exc_info.value.code == 1
+
+    def test_records_fresh_revision(self, tmp_path):
+        action_dir = tmp_path / "action"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = action_dir
+        resolver.get_head_revision.return_value = "fresh_sha_abc"
+        tracker = mod.RemoteActionTracker()
+
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1", resolver, tracker
+        )
+        assert result is not None
+        assert (
+            tracker.entries["github.com/owner/repo@v1"]["revision"] == "fresh_sha_abc"
+        )
+
 
 # ---------------------------------------------------------------------------
 # write_metadata
@@ -659,6 +754,57 @@ class TestWriteMetadata:
         data = y.load(metadata_file)
         assert "github.com/a/b@v1" in data
         assert "github.com/c/d@v2" in data
+
+    def test_includes_revision(self, tmp_path):
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        tracker = mod.RemoteActionTracker()
+        tracker.record("https://github.com/a/b", "v1", "p1", "abc123def456")
+
+        mod.write_metadata(output_dir, tracker)
+
+        metadata_file = tmp_path / ".github" / "inline-actions" / "actions.yaml"
+        y = YAML()
+        data = y.load(metadata_file)
+        assert data["github.com/a/b@v1"]["revision"] == "abc123def456"
+
+
+# ---------------------------------------------------------------------------
+# load_lock_file
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLockFile:
+    def test_loads_existing(self, tmp_path):
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        inline_dir = tmp_path / ".github" / "inline-actions"
+        inline_dir.mkdir(parents=True)
+        (inline_dir / "actions.yaml").write_text(
+            textwrap.dedent("""\
+            github.com/a/b@v1:
+              url: https://github.com/a/b
+              ref: v1
+              checkout_path: .github/inline-actions/github.com/a/b@v1
+              revision: abc123
+        """)
+        )
+        entries = mod.load_lock_file(output_dir)
+        assert "github.com/a/b@v1" in entries
+        assert entries["github.com/a/b@v1"]["revision"] == "abc123"
+
+    def test_returns_empty_when_missing(self, tmp_path):
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        assert mod.load_lock_file(output_dir) == {}
+
+    def test_returns_empty_for_empty_file(self, tmp_path):
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        inline_dir = tmp_path / ".github" / "inline-actions"
+        inline_dir.mkdir(parents=True)
+        (inline_dir / "actions.yaml").write_text("")
+        assert mod.load_lock_file(output_dir) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +970,22 @@ class TestGitActionResolver:
         )
         assert "git.example.com" in resolver._git_ssh_domains
 
+    def test_resolve_passes_revision(self, tmp_path):
+        """When revision is given, it is forwarded to _ensure_cloned."""
+        clone_dir = tmp_path / "clone"
+        clone_dir.mkdir()
+        (clone_dir / "action.yml").write_text("name: test\n")
+
+        resolver = mod.GitActionResolver(tmp_path)
+        resolver._cloned[("https://github.com/a/b", "v1")] = clone_dir
+
+        result = resolver.resolve("https://github.com/a/b", "", "v1", "abc123")
+        assert result == clone_dir
+
+    def test_get_head_revision_returns_none_for_unknown(self):
+        resolver = mod.GitActionResolver(Path("/tmp"))
+        assert resolver.get_head_revision("https://github.com/a/b", "v1") is None
+
 
 # ---------------------------------------------------------------------------
 # vendor_actions
@@ -984,3 +1146,22 @@ class TestMain:
         # Verify no trailing whitespace
         for i, line in enumerate(content.split("\n"), 1):
             assert line == line.rstrip(), f"Line {i} has trailing whitespace: {line!r}"
+
+    def test_frozen_without_lock_file_exits(self, tmp_path, capsys):
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        (source_dir / "ci.yaml").write_text("name: CI\non: push\njobs: {}\n")
+        output_dir = tmp_path / "output"
+
+        with pytest.raises(SystemExit) as exc_info:
+            mod.main(
+                [
+                    "--source-dir",
+                    str(source_dir),
+                    "--output-dir",
+                    str(output_dir),
+                    "--frozen",
+                ]
+            )
+        assert exc_info.value.code == 1
+        assert "--frozen" in capsys.readouterr().err

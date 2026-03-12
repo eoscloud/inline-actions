@@ -113,9 +113,15 @@ class GitActionResolver:
         # (repo_url, ref) -> local clone path
         self._cloned: dict[tuple[str, str], Path] = {}
 
-    def resolve(self, repo_url: str, subpath: str, ref: str) -> Path | None:
-        """Clone (if needed) and return the action directory on disk."""
-        clone_dir = self._ensure_cloned(repo_url, ref)
+    def resolve(
+        self, repo_url: str, subpath: str, ref: str, revision: str | None = None
+    ) -> Path | None:
+        """Clone (if needed) and return the action directory on disk.
+
+        When *revision* is given the clone is pinned to that exact commit
+        instead of whatever the *ref* currently points to.
+        """
+        clone_dir = self._ensure_cloned(repo_url, ref, revision)
         action_dir = clone_dir / subpath if subpath else clone_dir
         for name in ("action.yml", "action.yaml"):
             if (action_dir / name).is_file():
@@ -126,7 +132,24 @@ class GitActionResolver:
         )
         return None
 
-    def _ensure_cloned(self, repo_url: str, ref: str) -> Path:
+    def get_head_revision(self, repo_url: str, ref: str) -> str | None:
+        """Return the HEAD commit SHA for a previously-cloned repo."""
+        key = (repo_url, ref)
+        clone_dir = self._cloned.get(key)
+        if clone_dir is None:
+            return None
+        result = subprocess.run(
+            ["git", "-C", str(clone_dir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return None
+
+    def _ensure_cloned(
+        self, repo_url: str, ref: str, revision: str | None = None
+    ) -> Path:
         key = (repo_url, ref)
         if key in self._cloned:
             return self._cloned[key]
@@ -139,31 +162,78 @@ class GitActionResolver:
         clone_dir = self._cache_dir / safe_name
 
         if not clone_dir.exists():
-            print(f"  cloning {clone_url} (ref: {ref})...")
-            try:
+            if revision:
+                self._clone_at_revision(clone_url, clone_dir, revision)
+            else:
+                self._clone_at_ref(clone_url, clone_dir, ref)
+
+        self._cloned[key] = clone_dir
+        return clone_dir
+
+    def _clone_at_ref(self, clone_url: str, clone_dir: Path, ref: str) -> None:
+        print(f"  cloning {clone_url} (ref: {ref})...")
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    f"--branch={ref}",
+                    "--single-branch",
+                    clone_url,
+                    str(clone_dir),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(
+                f"error: git clone failed for {clone_url}@{ref}:\n{e.stderr}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    def _clone_at_revision(
+        self, clone_url: str, clone_dir: Path, revision: str
+    ) -> None:
+        print(f"  cloning {clone_url} (revision: {revision})...")
+        try:
+            clone_dir.mkdir(parents=True, exist_ok=True)
+            for cmd in [
+                ["git", "init", str(clone_dir)],
+                [
+                    "git",
+                    "-C",
+                    str(clone_dir),
+                    "remote",
+                    "add",
+                    "origin",
+                    clone_url,
+                ],
+                [
+                    "git",
+                    "-C",
+                    str(clone_dir),
+                    "fetch",
+                    "--depth=1",
+                    "origin",
+                    revision,
+                ],
+                ["git", "-C", str(clone_dir), "checkout", "FETCH_HEAD"],
+            ]:
                 subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "--depth=1",
-                        f"--branch={ref}",
-                        "--single-branch",
-                        clone_url,
-                        str(clone_dir),
-                    ],
+                    cmd,
                     check=True,
                     capture_output=True,
                     text=True,
                 )
-            except subprocess.CalledProcessError as e:
-                print(
-                    f"error: git clone failed for {clone_url}@{ref}:\n{e.stderr}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-
-        self._cloned[key] = clone_dir
-        return clone_dir
+        except subprocess.CalledProcessError as e:
+            print(
+                f"error: git clone failed for {clone_url} at revision {revision}:\n{e.stderr}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -178,13 +248,22 @@ class RemoteActionTracker:
         # identifier (host/owner/repo@ref) -> {url, ref, checkout_path}
         self._entries: dict[str, dict[str, str]] = {}
 
-    def record(self, repo_url: str, ref: str, checkout_path: str) -> None:
+    def record(
+        self,
+        repo_url: str,
+        ref: str,
+        checkout_path: str,
+        revision: str | None = None,
+    ) -> None:
         identifier = repo_url_to_identifier(repo_url, ref)
-        self._entries[identifier] = {
+        entry: dict[str, str] = {
             "url": repo_url,
             "ref": ref,
             "checkout_path": checkout_path,
         }
+        if revision is not None:
+            entry["revision"] = revision
+        self._entries[identifier] = entry
 
     @property
     def entries(self) -> dict[str, dict[str, str]]:
@@ -239,6 +318,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "the generated workflows."
         ),
     )
+    parser.add_argument(
+        "--frozen",
+        action="store_true",
+        default=False,
+        help=(
+            "Use exact revisions from the existing lock file instead of "
+            "resolving refs to their current commits. Requires an existing "
+            "lock file with revision entries for all remote actions used. "
+            "Run without --frozen to update revisions."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -270,8 +360,12 @@ def resolve_remote_action(
     git_resolver: GitActionResolver,
     tracker: RemoteActionTracker,
     inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
+    locked_entries: dict[str, dict[str, str]] | None = None,
 ) -> tuple[Path, str] | None:
     """Resolve a URL-based `uses:` to (action_dir_on_disk, workspace_relative_path).
+
+    When *locked_entries* is provided (``--frozen`` mode), the clone is pinned
+    to the exact revision recorded in the lock file.
 
     Returns None if the uses value is not a remote URL reference or
     if it cannot be resolved.
@@ -281,16 +375,42 @@ def resolve_remote_action(
         return None
 
     repo_url, subpath, ref = parsed
-    action_dir = git_resolver.resolve(repo_url, subpath, ref)
+    identifier = repo_url_to_identifier(repo_url, ref)
+
+    # Determine revision: locked or fresh
+    revision = None
+    if locked_entries is not None:
+        locked = locked_entries.get(identifier)
+        if locked is None:
+            print(
+                f"error: {identifier} not found in lock file "
+                f"(--frozen requires all remote actions to be locked). "
+                f"Run without --frozen to update the lock file.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        revision = locked.get("revision")
+        if revision is None:
+            print(
+                f"error: {identifier} has no revision in lock file. "
+                f"Run without --frozen to update the lock file.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    action_dir = git_resolver.resolve(repo_url, subpath, ref, revision)
     if action_dir is None:
         return None
 
+    # If not frozen, resolve the fresh revision from the clone
+    if revision is None:
+        revision = git_resolver.get_head_revision(repo_url, ref)
+
     # Derive workspace-relative checkout path from repo URL + ref
-    identifier = repo_url_to_identifier(repo_url, ref)
     checkout_base = f"{inline_actions_dir}/{identifier}"
     workspace_path = f"{checkout_base}/{subpath}" if subpath else checkout_base
 
-    tracker.record(repo_url, ref, checkout_base)
+    tracker.record(repo_url, ref, checkout_base, revision)
 
     return action_dir, workspace_path
 
@@ -401,6 +521,7 @@ def inline_step(
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
     inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
+    locked_entries: dict[str, dict[str, str]] | None = None,
 ) -> list[dict]:
     """Inline a single step if it uses a composite action, else return as-is."""
     uses = step.get("uses")
@@ -415,7 +536,7 @@ def inline_step(
     # Try remote resolution
     if resolved is None and git_resolver is not None:
         resolved = resolve_remote_action(
-            uses_str, git_resolver, tracker, inline_actions_dir
+            uses_str, git_resolver, tracker, inline_actions_dir, locked_entries
         )
 
     if resolved is None:
@@ -435,6 +556,7 @@ def process_workflow(
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
     inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
+    locked_entries: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Process a workflow, inlining all composite action references."""
     workflow = copy.deepcopy(workflow)
@@ -445,7 +567,9 @@ def process_workflow(
         new_steps: list[dict] = []
         for step in steps:
             new_steps.extend(
-                inline_step(step, git_resolver, tracker, inline_actions_dir)
+                inline_step(
+                    step, git_resolver, tracker, inline_actions_dir, locked_entries
+                )
             )
         job["steps"] = new_steps
 
@@ -453,8 +577,26 @@ def process_workflow(
 
 
 # ---------------------------------------------------------------------------
-# Metadata
+# Metadata / lock file
 # ---------------------------------------------------------------------------
+
+
+def load_lock_file(output_dir: Path) -> dict[str, dict[str, str]]:
+    """Load the existing lock file (.github/inline-actions/actions.yaml).
+
+    Returns a dict mapping identifier to entry, or an empty dict if the
+    file does not exist.
+    """
+    inline_actions_dir = output_dir.parent / "inline-actions"
+    lock_file = inline_actions_dir / "actions.yaml"
+    if not lock_file.exists():
+        return {}
+    y = _make_yaml()
+    with open(lock_file) as f:
+        data = y.load(f)
+    if data is None:
+        return {}
+    return {str(k): dict(v) for k, v in data.items()}
 
 
 def write_metadata(output_dir: Path, tracker: RemoteActionTracker) -> None:
@@ -590,6 +732,7 @@ def process_file(
     git_resolver: GitActionResolver | None,
     tracker: RemoteActionTracker,
     inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
+    locked_entries: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Process a single workflow file."""
     y = _make_yaml()
@@ -604,7 +747,9 @@ def process_file(
         )
         return
 
-    processed = process_workflow(workflow, git_resolver, tracker, inline_actions_dir)
+    processed = process_workflow(
+        workflow, git_resolver, tracker, inline_actions_dir, locked_entries
+    )
 
     rel_path = source_file.relative_to(source_dir)
     source_ref = f"{source_dir_rel}/{rel_path}"
@@ -669,6 +814,18 @@ def main(argv: list[str] | None = None) -> None:
     # Derive inline-actions directory from output directory
     inline_actions_dir = str(output_dir.parent / "inline-actions")
 
+    # Load lock file when --frozen
+    locked_entries: dict[str, dict[str, str]] | None = None
+    if args.frozen:
+        locked_entries = load_lock_file(output_dir)
+        if not locked_entries:
+            print(
+                "error: --frozen requires an existing lock file with entries, "
+                "but none was found. Run without --frozen first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     print(f"Processing {len(source_files)} workflow(s):")
     for source_file in source_files:
         process_file(
@@ -679,6 +836,7 @@ def main(argv: list[str] | None = None) -> None:
             git_resolver,
             tracker,
             inline_actions_dir,
+            locked_entries,
         )
 
     write_metadata(output_dir, tracker)
