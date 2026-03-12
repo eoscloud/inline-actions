@@ -8,6 +8,8 @@ on:
 jobs:
   unit-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v6
 
@@ -23,16 +25,11 @@ jobs:
       run: uv sync --group dev
 
     - name: run unit tests
-      run: uv run pytest --cov-report=xml --cov-report=term-missing --junitxml=test-results.xml
+      run: uv run pytest --cov-report=xml --cov-report=json --cov-report=term-missing --junitxml=test-results.xml
 
     - name: generate coverage badge
       if: github.ref == 'refs/heads/main' && always()
-      uses: action-badges/cobertura-coverage-xml-badges@0.4.0
-      with:
-        file-name: coverage.svg
-        badge-branch: badges
-        github-token: '${{ secrets.GITHUB_TOKEN }}'
-        coverage-file-name: ./coverage.xml
+      uses: we-cli/coverage-badge-action@main
 
   test-inline:
     runs-on: ubuntu-latest
