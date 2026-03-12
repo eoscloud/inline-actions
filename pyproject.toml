@@ -7,9 +7,19 @@ dependencies = [
     "ruamel.yaml",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=inline_actions --cov-report=term-missing"
 
 [project.scripts]
 inline-actions = "inline_actions:main"

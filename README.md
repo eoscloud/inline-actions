@@ -1,6 +1,7 @@
 # inline-actions
 
 [![CI](https://github.com/eoscloud/inline-actions/actions/workflows/ci.yaml/badge.svg)](https://github.com/eoscloud/inline-actions/actions/workflows/ci.yaml)
+[![Coverage](https://github.com/eoscloud/inline-actions/blob/badges/coverage.svg?raw=true)](https://github.com/eoscloud/inline-actions/actions/workflows/ci.yaml)
 [![pre-commit](https://github.com/eoscloud/inline-actions/actions/workflows/pre-commit.yaml/badge.svg)](https://github.com/eoscloud/inline-actions/actions/workflows/pre-commit.yaml)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
