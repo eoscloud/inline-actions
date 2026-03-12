@@ -8,6 +8,14 @@ on:
 jobs:
   test-inline:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant:
+          - name: vendor
+            flags: ''
+          - name: no-vendor
+            flags: '--no-vendor'
+    name: test-inline (${{ matrix.variant.name }})
     steps:
     - uses: actions/checkout@v6
 
@@ -46,7 +54,7 @@ jobs:
         WORKFLOW
 
     - name: run inline-actions
-      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows
+      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows ${{ matrix.variant.flags }}
 
     - name: verify output exists
       run: test -f .test/workflows/test.yaml
@@ -74,3 +82,38 @@ jobs:
           echo "FAIL: metadata file was not generated"
           exit 1
         fi
+
+    - name: verify vendored action sources exist
+      if: matrix.variant.name == 'vendor'
+      run: |
+        VENDOR_DIR=".test/inline-actions/github.com/tailscale/github-action@v3"
+        if [ -d "$VENDOR_DIR" ]; then
+          echo "PASS: vendored action sources found at $VENDOR_DIR"
+          ls -la "$VENDOR_DIR"
+        else
+          echo "FAIL: vendored action sources not found at $VENDOR_DIR"
+          exit 1
+        fi
+        # Verify action.yml is present in the vendored copy
+        if [ -f "$VENDOR_DIR/action.yml" ] || [ -f "$VENDOR_DIR/action.yaml" ]; then
+          echo "PASS: action.yml found in vendored sources"
+        else
+          echo "FAIL: no action.yml in vendored sources"
+          exit 1
+        fi
+        # Verify .git directory was NOT copied
+        if [ -d "$VENDOR_DIR/.git" ]; then
+          echo "FAIL: .git directory should not be vendored"
+          exit 1
+        fi
+        echo "PASS: .git directory correctly excluded"
+
+    - name: verify no vendored action sources
+      if: matrix.variant.name == 'no-vendor'
+      run: |
+        VENDOR_DIR=".test/inline-actions/github.com/tailscale/github-action@v3"
+        if [ -d "$VENDOR_DIR" ]; then
+          echo "FAIL: vendored action sources should not exist with --no-vendor"
+          exit 1
+        fi
+        echo "PASS: no vendored action sources (as expected with --no-vendor)"

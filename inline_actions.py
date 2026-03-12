@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import copy
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -220,6 +221,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=("Directory to cache cloned repos. Defaults to a temporary directory."),
+    )
+    parser.add_argument(
+        "--no-vendor",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable vendoring of remote action sources. When set, remote "
+            "action sources will NOT be copied into the repository. You must "
+            "ensure they are checked out at the expected paths before running "
+            "the generated workflows."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -470,6 +482,78 @@ def write_metadata(output_dir: Path, tracker: RemoteActionTracker) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Vendoring
+# ---------------------------------------------------------------------------
+
+
+def vendor_actions(
+    git_resolver: GitActionResolver, tracker: RemoteActionTracker
+) -> None:
+    """Copy cloned remote action sources into the repository.
+
+    For each tracked remote action, copies the cloned source tree into
+    the checkout_path recorded in the tracker, so that the generated
+    workflows can reference these files at runtime without additional
+    checkout steps.
+    """
+    entries = tracker.entries
+    if not entries:
+        return
+
+    for identifier, entry in sorted(entries.items()):
+        checkout_path = Path(entry["checkout_path"])
+        repo_url = entry["url"]
+        ref = entry["ref"]
+
+        # Look up the clone directory from the resolver
+        key = (repo_url, ref)
+        clone_dir = git_resolver._cloned.get(key)
+        if clone_dir is None:
+            print(
+                f"  warning: no cached clone for {identifier}, skipping vendor",
+                file=sys.stderr,
+            )
+            continue
+
+        # Remove existing vendored copy and replace with fresh one
+        if checkout_path.exists():
+            shutil.rmtree(checkout_path)
+        checkout_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy the clone, excluding the .git directory
+        shutil.copytree(clone_dir, checkout_path, ignore=shutil.ignore_patterns(".git"))
+        print(f"  vendored {identifier} -> {checkout_path}")
+
+
+def print_no_vendor_notice(tracker: RemoteActionTracker) -> None:
+    """Print information about required checkouts when vendoring is disabled."""
+    entries = tracker.entries
+    if not entries:
+        return
+
+    print()
+    print(
+        "WARNING: Vendoring is disabled (--no-vendor). The generated workflows "
+        "reference remote action files that are NOT included in the repository."
+    )
+    print(
+        "You must ensure the following repositories are checked out at the "
+        "listed paths before the workflows run:"
+    )
+    print()
+    for identifier, entry in sorted(entries.items()):
+        print(f"  {identifier}")
+        print(f"    url: {entry['url']}")
+        print(f"    ref: {entry['ref']}")
+        print(f"    path: {entry['checkout_path']}")
+    print()
+    print(
+        "The metadata file .github/inline-actions/actions.yaml contains this "
+        "information in machine-readable form."
+    )
+
+
+# ---------------------------------------------------------------------------
 # File processing
 # ---------------------------------------------------------------------------
 
@@ -578,6 +662,11 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     write_metadata(output_dir, tracker)
+
+    if args.no_vendor:
+        print_no_vendor_notice(tracker)
+    else:
+        vendor_actions(git_resolver, tracker)
 
     print("Done.")
 

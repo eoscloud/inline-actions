@@ -59,6 +59,7 @@ uv run inline-actions \
 | `--output-dir DIR` | `.github/workflows` | Directory to write generated workflows |
 | `--git-ssh DOMAIN` | | Use SSH (`git@host:path`) instead of HTTPS when cloning from this domain (repeatable) |
 | `--git-cache-dir DIR` | temporary directory | Directory to cache cloned repos |
+| `--no-vendor` | | Disable vendoring of remote action sources (see [Vendoring](#vendoring)) |
 
 ### Local Actions
 
@@ -118,6 +119,18 @@ github.com/tailscale/github-action@v2:
 
 The same repo may appear multiple times at different refs if different workflows pin to different versions. This metadata should be committed to the consumer repo and can be consumed by tooling to generate the required checkout steps.
 
+### Vendoring
+
+By default, inline-actions copies ("vendors") remote action sources into the repository at their expected checkout paths under `.github/inline-actions/`. This means the generated workflows work out of the box — no additional checkout steps are needed at CI time.
+
+If you prefer not to vendor action sources (e.g. to keep the repository smaller), pass `--no-vendor`:
+
+```bash
+uv run inline-actions --no-vendor
+```
+
+When vendoring is disabled, inline-actions will print a notice listing each remote action, its URL, ref, and the path where it must be available at runtime. You are responsible for ensuring these repositories are checked out at the correct paths before the generated workflows run. The metadata file `.github/inline-actions/actions.yaml` contains this information in machine-readable form.
+
 ## Expression Replacement
 
 Only these patterns are replaced during inlining:
@@ -151,6 +164,17 @@ When using the conventional `.github/workflow-sources` → `.github/workflows` l
     - id: inline-actions
       args:
         - --git-ssh=git.example.com
+```
+
+To disable vendoring in the pre-commit hook:
+
+```yaml
+- repo: https://github.com/eoscloud/inline-actions
+  rev: main
+  hooks:
+    - id: inline-actions
+      args:
+        - --no-vendor
 ```
 
 For workflows using local `uses: ./` references, the referenced actions must be present in the same repository.
