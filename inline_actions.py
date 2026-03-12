@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Stephan Peijnik-Steinwender <speijnik@eoscloud.io>
+# Copyright (c) 2026 eos GmbH
 """Inline composite GitHub Actions into workflow files.
 
 Gitea ACT runner has a bug where composite action steps are hidden.
