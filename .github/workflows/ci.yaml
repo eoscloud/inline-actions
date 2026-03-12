@@ -143,3 +143,150 @@ jobs:
           exit 1
         fi
         echo "PASS: no vendored action sources (as expected with --no-vendor)"
+
+  test-frozen:
+    runs-on: ubuntu-latest
+    name: test-frozen
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: setup python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+
+    - name: install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: install inline-actions
+      run: uv sync
+
+    # Phase 1: Inline tailscale/github-action@v2 to capture its revision SHA.
+    # v2 is Linux-only; its Check Runner OS step contains "Support Linux Only".
+    - name: create v2 workflow source
+      run: |
+        mkdir -p .test/workflow-sources
+        cat > .test/workflow-sources/test.yaml << 'WORKFLOW'
+        name: test-tailscale
+        on: push
+        jobs:
+          connect:
+            runs-on: ubuntu-latest
+            steps:
+            - uses: actions/checkout@v6
+            - name: connect to tailscale
+              uses: https://github.com/tailscale/github-action@v2
+              with:
+                oauth-client-id: fake-client-id
+                oauth-secret: fake-secret
+                tags: tag:ci
+        WORKFLOW
+
+    - name: run inline-actions (v2)
+      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows
+
+    - name: verify v2 output and capture revision
+      id: v2
+      run: |
+        echo "--- v2 workflow output ---"
+        cat .test/workflows/test.yaml
+        # v2 is Linux-only: the Check Runner OS step must say "Support Linux Only"
+        if ! grep -q 'Support Linux Only' .test/workflows/test.yaml; then
+          echo "FAIL: v2 output missing 'Support Linux Only'"
+          exit 1
+        fi
+        echo "PASS: v2 output contains v2-specific content"
+
+        # Lock file must contain a revision entry
+        echo "--- v2 lock file ---"
+        cat .test/inline-actions/actions.yaml
+        V2_REV=$(grep 'revision:' .test/inline-actions/actions.yaml | awk '{print $2}')
+        if [ -z "$V2_REV" ]; then
+          echo "FAIL: lock file has no revision"
+          exit 1
+        fi
+        echo "v2 revision: $V2_REV"
+        echo "revision=$V2_REV" >> "$GITHUB_OUTPUT"
+
+    # Phase 2: Forge a lock file that maps the @v3 identity to v2's revision.
+    # Then switch the workflow source to @v3 and run with --frozen.
+    # Because --frozen pins to the lock file's revision, we should still get
+    # v2's code (Linux-only) even though the ref says v3 (multi-platform).
+    - name: forge v3 lock file with v2 revision
+      run: |
+        cat > .test/inline-actions/actions.yaml << EOF
+        github.com/tailscale/github-action@v3:
+          url: https://github.com/tailscale/github-action
+          ref: v3
+          checkout_path: .test/inline-actions/github.com/tailscale/github-action@v3
+          revision: ${{ steps.v2.outputs.revision }}
+        EOF
+        echo "--- forged lock file ---"
+        cat .test/inline-actions/actions.yaml
+
+    - name: create v3 workflow source
+      run: |
+        cat > .test/workflow-sources/test.yaml << 'WORKFLOW'
+        name: test-tailscale
+        on: push
+        jobs:
+          connect:
+            runs-on: ubuntu-latest
+            steps:
+            - uses: actions/checkout@v6
+            - name: connect to tailscale
+              uses: https://github.com/tailscale/github-action@v3
+              with:
+                oauth-client-id: fake-client-id
+                oauth-secret: fake-secret
+                tags: tag:ci
+        WORKFLOW
+
+    - name: run inline-actions --frozen (v3 ref, v2 revision)
+      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows --frozen
+
+    - name: verify frozen output uses v2 code despite v3 ref
+      run: |
+        echo "--- frozen workflow output ---"
+        cat .test/workflows/test.yaml
+        # v2 code: "Support Linux Only" (single-platform)
+        if ! grep -q 'Support Linux Only' .test/workflows/test.yaml; then
+          echo "FAIL: --frozen output missing v2 marker 'Support Linux Only'"
+          exit 1
+        fi
+        # v3 code: "Support Linux, Windows, and macOS Only" (multi-platform) — must be absent
+        if grep -q 'Support Linux, Windows, and macOS Only' .test/workflows/test.yaml; then
+          echo "FAIL: --frozen output contains v3 marker — revision was not pinned"
+          exit 1
+        fi
+        echo "PASS: --frozen correctly pinned to v2 revision"
+
+    # Phase 3: Run without --frozen to verify it resolves v3's actual code.
+    - name: run inline-actions without --frozen (v3 ref, fresh resolve)
+      run: uv run inline-actions --source-dir .test/workflow-sources --output-dir .test/workflows
+
+    - name: verify unfrozen output uses v3 code
+      run: |
+        echo "--- unfrozen workflow output ---"
+        cat .test/workflows/test.yaml
+        # v3 code: "Support Linux, Windows, and macOS Only"
+        if ! grep -q 'Support Linux, Windows, and macOS Only' .test/workflows/test.yaml; then
+          echo "FAIL: unfrozen output missing v3 marker"
+          exit 1
+        fi
+        # v2 marker must be absent
+        if grep -q 'Support Linux Only' .test/workflows/test.yaml; then
+          echo "FAIL: unfrozen output still contains v2 marker"
+          exit 1
+        fi
+        echo "PASS: without --frozen, v3 code is correctly resolved"
+
+        # Verify the lock file revision was updated
+        echo "--- updated lock file ---"
+        cat .test/inline-actions/actions.yaml
+        NEW_REV=$(grep 'revision:' .test/inline-actions/actions.yaml | awk '{print $2}')
+        if [ "$NEW_REV" = "${{ steps.v2.outputs.revision }}" ]; then
+          echo "FAIL: revision was not updated (still v2 SHA)"
+          exit 1
+        fi
+        echo "PASS: lock file revision updated to v3 SHA ($NEW_REV)"
