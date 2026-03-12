@@ -761,6 +761,21 @@ class TestProcessFile:
         assert data["name"] == "CI"
         assert "build" in data["jobs"]
 
+    def test_preserves_list_indentation(self, tmp_path):
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        source_file = self._make_source(source_dir)
+        tracker = mod.RemoteActionTracker()
+
+        mod.process_file(source_file, source_dir, "sources", output_dir, None, tracker)
+
+        content = (output_dir / "ci.yaml").read_text()
+        # Lists must be indented under their parent key, not at the same level
+        assert "    steps:\n      - name:" in content
+        assert "    branches: [main]" in content
+
 
 # ---------------------------------------------------------------------------
 # GitActionResolver
@@ -887,6 +902,11 @@ class TestMakeYaml:
     def test_width(self):
         y = mod._make_yaml()
         assert y.width == 120
+
+    def test_sequence_indent(self):
+        y = mod._make_yaml()
+        assert y.sequence_indent == 4
+        assert y.sequence_dash_offset == 2
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ def _make_yaml() -> YAML:
     y = YAML()
     y.preserve_quotes = True
     y.width = 120
+    y.indent(mapping=2, sequence=4, offset=2)
     return y
 
 
