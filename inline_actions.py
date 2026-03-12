@@ -405,6 +405,13 @@ def resolve_remote_action(
     # If not frozen, resolve the fresh revision from the clone
     if revision is None:
         revision = git_resolver.get_head_revision(repo_url, ref)
+        if revision is None:
+            print(
+                f"error: failed to determine revision for {identifier}. "
+                f"The lock file would be incomplete.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Derive workspace-relative checkout path from repo URL + ref
     checkout_base = f"{inline_actions_dir}/{identifier}"

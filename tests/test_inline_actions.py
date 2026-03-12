@@ -696,6 +696,24 @@ class TestResolveRemoteAction:
             tracker.entries["github.com/owner/repo@v1"]["revision"] == "fresh_sha_abc"
         )
 
+    def test_fresh_revision_none_exits(self, tmp_path):
+        """When get_head_revision returns None the lock file would lack a
+        revision, breaking a later --frozen run.  The code must abort."""
+        action_dir = tmp_path / "action"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = action_dir
+        resolver.get_head_revision.return_value = None
+        tracker = mod.RemoteActionTracker()
+
+        with pytest.raises(SystemExit) as exc_info:
+            mod.resolve_remote_action(
+                "https://github.com/owner/repo@v1", resolver, tracker
+            )
+        assert exc_info.value.code == 1
+
 
 # ---------------------------------------------------------------------------
 # write_metadata
@@ -1146,6 +1164,138 @@ class TestMain:
         # Verify no trailing whitespace
         for i, line in enumerate(content.split("\n"), 1):
             assert line == line.rstrip(), f"Line {i} has trailing whitespace: {line!r}"
+
+    def test_end_to_end_remote_records_revision(self, tmp_path):
+        """Non-frozen mode must record a fresh revision in the lock file."""
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+
+        # Create a workflow that references a remote action
+        (source_dir / "ci.yaml").write_text(
+            textwrap.dedent("""\
+            name: CI
+            on: push
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: my-step
+                    uses: https://github.com/owner/repo@v1
+        """)
+        )
+
+        # Create a fake action directory for the mock resolver
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: test
+            runs:
+              using: composite
+              steps:
+                - name: hello
+                  run: echo hello
+        """)
+        )
+
+        with patch("inline_actions.GitActionResolver") as MockResolver:
+            mock_instance = MockResolver.return_value
+            mock_instance.resolve.return_value = fake_action_dir
+            mock_instance.get_head_revision.return_value = "fresh_sha_999"
+
+            mod.main(
+                [
+                    "--source-dir",
+                    str(source_dir),
+                    "--output-dir",
+                    str(output_dir),
+                    "--no-vendor",
+                ]
+            )
+
+        # Verify the output actions.yaml contains a revision
+        lock_file = tmp_path / ".github" / "inline-actions" / "actions.yaml"
+        assert lock_file.exists()
+        y = YAML()
+        data = y.load(lock_file)
+        assert data["github.com/owner/repo@v1"]["revision"] == "fresh_sha_999"
+
+    def test_frozen_end_to_end_preserves_revision(self, tmp_path):
+        """In frozen mode, the output actions.yaml must contain the locked revision."""
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+
+        # Create a lock file with a specific revision
+        inline_dir = tmp_path / ".github" / "inline-actions"
+        inline_dir.mkdir(parents=True)
+        (inline_dir / "actions.yaml").write_text(
+            textwrap.dedent("""\
+            github.com/owner/repo@v1:
+              url: https://github.com/owner/repo
+              ref: v1
+              checkout_path: .github/inline-actions/github.com/owner/repo@v1
+              revision: abc123deadbeef
+        """)
+        )
+
+        # Create a workflow that references the remote action
+        (source_dir / "ci.yaml").write_text(
+            textwrap.dedent("""\
+            name: CI
+            on: push
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: my-step
+                    uses: https://github.com/owner/repo@v1
+        """)
+        )
+
+        # Create a fake action directory for the mock resolver
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: test
+            runs:
+              using: composite
+              steps:
+                - name: hello
+                  run: echo hello
+        """)
+        )
+
+        with patch("inline_actions.GitActionResolver") as MockResolver:
+            mock_instance = MockResolver.return_value
+            mock_instance.resolve.return_value = fake_action_dir
+
+            mod.main(
+                [
+                    "--source-dir",
+                    str(source_dir),
+                    "--output-dir",
+                    str(output_dir),
+                    "--frozen",
+                    "--no-vendor",
+                ]
+            )
+
+            # Verify the resolver was called with the locked revision
+            mock_instance.resolve.assert_called_once()
+            call_args = mock_instance.resolve.call_args
+            assert call_args[0][3] == "abc123deadbeef"  # revision argument
+
+        # Verify the output actions.yaml preserves the revision
+        output_lock = inline_dir / "actions.yaml"
+        assert output_lock.exists()
+        y = YAML()
+        data = y.load(output_lock)
+        assert data["github.com/owner/repo@v1"]["revision"] == "abc123deadbeef"
 
     def test_frozen_without_lock_file_exits(self, tmp_path, capsys):
         source_dir = tmp_path / "sources"
