@@ -30,24 +30,49 @@ In consumer repos:
 | `.github/workflow-sources/` | Workflows written as if composite actions work natively (the "source of truth") |
 | `.github/workflows/` | **Generated** output with composite actions inlined (committed to repo, used by runner) |
 
-## Installation
+## Getting Started
 
-```bash
-uv sync
-```
+Follow these steps to start using inline-actions in a repository:
+
+1. **Create the source directory** for your workflow files:
+
+   ```bash
+   mkdir -p .github/workflow-sources
+   ```
+
+2. **Move your existing workflows** from `.github/workflows/` to `.github/workflow-sources/`, or write new ones there. These source files are the ones you edit — they can reference composite actions via `uses:` as usual.
+
+3. **Run inline-actions** from the repository root to generate the output workflows:
+
+   ```bash
+   uvx --from git+https://github.com/eoscloud/inline-actions inline-actions
+   ```
+
+   This reads every `*.yml`/`*.yaml` file in `.github/workflow-sources/`, inlines any composite action references, and writes the result to `.github/workflows/`. If remote actions are used, a lock file (`.github/inline-actions/actions.yaml`) and vendored action sources are created as well.
+
+4. **Commit the results** — the generated workflows, the lock file (if created), and the vendored action sources should all be committed:
+
+   ```bash
+   git add .github/workflows/ .github/inline-actions/
+   git commit -m "chore: add inlined workflows"
+   ```
+
+5. **Set up the pre-commit hook** (optional but recommended) so workflows are re-generated automatically on commit. See [Pre-commit Hook](#pre-commit-hook) for details.
+
+From here on, edit only the files in `.github/workflow-sources/` and let inline-actions regenerate `.github/workflows/`.
 
 ## Usage
 
-When run from the root of a consumer repo using the conventional directory layout, no arguments are needed:
+`inline-actions` is published as a Python package and can be run directly via [`uvx`](https://docs.astral.sh/uv/guides/tools/) without installing it first:
 
 ```bash
-uv run inline-actions
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions
 ```
 
-All arguments have sane defaults. Pass explicit values only when the conventional layout doesn't apply:
+When run from the root of a consumer repo using the conventional directory layout, no arguments are needed. All arguments have sane defaults — pass explicit values only when the conventional layout doesn't apply:
 
 ```bash
-uv run inline-actions \
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions \
   --source-dir /path/to/consumer/.github/workflow-sources \
   --output-dir /path/to/consumer/.github/workflows
 ```
@@ -97,7 +122,7 @@ https://github.com/tailscale/github-action@v3
 If the Git server requires SSH authentication, add `--git-ssh DOMAIN` to clone via SSH for that domain:
 
 ```bash
-uv run inline-actions --git-ssh git.example.com
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions --git-ssh git.example.com
 ```
 
 The option is repeatable — use multiple `--git-ssh` flags for different domains.
@@ -123,7 +148,7 @@ The same repo may appear multiple times at different refs if different workflows
 Pass `--frozen` to clone at the **exact revision** recorded in the lock file instead of whatever the ref (e.g. `v3`) currently points to. This guarantees reproducible builds — the vendored code and generated workflows will be identical across runs, even if the upstream tag has moved.
 
 ```bash
-uv run inline-actions --frozen
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions --frozen
 ```
 
 `--frozen` requires an existing lock file with `revision` entries for all remote actions. If an action is missing or has no revision, inline-actions exits with an error.
@@ -133,7 +158,7 @@ uv run inline-actions --frozen
 To update the lock file with the latest commits that the refs point to, run **without** `--frozen`:
 
 ```bash
-uv run inline-actions
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions
 ```
 
 This resolves each ref to its current commit SHA and writes the updated revisions to the lock file. Review the diff and commit the result.
@@ -145,7 +170,7 @@ By default, inline-actions copies ("vendors") remote action sources into the rep
 If you prefer not to vendor action sources (e.g. to keep the repository smaller), pass `--no-vendor`:
 
 ```bash
-uv run inline-actions --no-vendor
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions --no-vendor
 ```
 
 When vendoring is disabled, inline-actions will print a notice listing each remote action, its URL, ref, and the path where it must be available at runtime. You are responsible for ensuring these repositories are checked out at the correct paths before the generated workflows run. The metadata file `.github/inline-actions/actions.yaml` contains this information in machine-readable form.
@@ -201,7 +226,7 @@ To disable vendoring in the pre-commit hook:
 To update the lock file with fresh revisions, run inline-actions directly (without `--frozen`):
 
 ```bash
-uv run inline-actions
+uvx --from git+https://github.com/eoscloud/inline-actions inline-actions
 ```
 
 Then commit the updated lock file and vendored sources.
