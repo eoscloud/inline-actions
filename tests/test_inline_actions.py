@@ -1297,21 +1297,76 @@ class TestMain:
         data = y.load(output_lock)
         assert data["github.com/owner/repo@v1"]["revision"] == "abc123deadbeef"
 
-    def test_frozen_without_lock_file_exits(self, tmp_path, capsys):
+    def test_frozen_without_lock_file_succeeds_no_remote(self, tmp_path):
+        """--frozen with no lock file is fine when no remote actions are used."""
         source_dir = tmp_path / "sources"
         source_dir.mkdir()
         (source_dir / "ci.yaml").write_text("name: CI\non: push\njobs: {}\n")
-        output_dir = tmp_path / "output"
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
 
-        with pytest.raises(SystemExit) as exc_info:
-            mod.main(
-                [
-                    "--source-dir",
-                    str(source_dir),
-                    "--output-dir",
-                    str(output_dir),
-                    "--frozen",
-                ]
-            )
-        assert exc_info.value.code == 1
-        assert "--frozen" in capsys.readouterr().err
+        # Should not raise
+        mod.main(
+            [
+                "--source-dir",
+                str(source_dir),
+                "--output-dir",
+                str(output_dir),
+                "--frozen",
+            ]
+        )
+
+    def test_frozen_with_empty_lock_file_succeeds_no_remote(self, tmp_path):
+        """--frozen with empty lock file is fine when no remote actions are used."""
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        (source_dir / "ci.yaml").write_text("name: CI\non: push\njobs: {}\n")
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        inline_dir = tmp_path / ".github" / "inline-actions"
+        inline_dir.mkdir(parents=True)
+        (inline_dir / "actions.yaml").write_text("")
+
+        # Should not raise
+        mod.main(
+            [
+                "--source-dir",
+                str(source_dir),
+                "--output-dir",
+                str(output_dir),
+                "--frozen",
+            ]
+        )
+
+    def test_frozen_without_lock_file_exits_with_remote(self, tmp_path, capsys):
+        """--frozen without lock file must fail when a remote action is referenced."""
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        (source_dir / "ci.yaml").write_text(
+            textwrap.dedent("""\
+            name: CI
+            on: push
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: remote
+                    uses: https://github.com/owner/repo@v1
+        """)
+        )
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+
+        with patch("inline_actions.GitActionResolver"):
+            with pytest.raises(SystemExit) as exc_info:
+                mod.main(
+                    [
+                        "--source-dir",
+                        str(source_dir),
+                        "--output-dir",
+                        str(output_dir),
+                        "--frozen",
+                    ]
+                )
+            assert exc_info.value.code == 1
+            assert "not found in lock file" in capsys.readouterr().err

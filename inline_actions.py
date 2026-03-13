@@ -324,8 +324,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help=(
             "Use exact revisions from the existing lock file instead of "
-            "resolving refs to their current commits. Requires an existing "
-            "lock file with revision entries for all remote actions used. "
+            "resolving refs to their current commits. Requires revision "
+            "entries in the lock file for all remote actions used. "
+            "An empty or missing lock file is allowed when no remote "
+            "actions are referenced. "
             "Run without --frozen to update revisions."
         ),
     )
@@ -825,13 +827,6 @@ def main(argv: list[str] | None = None) -> None:
     locked_entries: dict[str, dict[str, str]] | None = None
     if args.frozen:
         locked_entries = load_lock_file(output_dir)
-        if not locked_entries:
-            print(
-                "error: --frozen requires an existing lock file with entries, "
-                "but none was found. Run without --frozen first.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
 
     print(f"Processing {len(source_files)} workflow(s):")
     for source_file in source_files:
