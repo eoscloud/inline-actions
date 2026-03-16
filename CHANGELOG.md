@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0](https://github.com/eoscloud/inline-actions/compare/v1.1.1...v1.2.0) (2026-03-16)
+
+
+### Features
+
+* add step ID mangling and output mapping for composite actions ([0474021](https://github.com/eoscloud/inline-actions/commit/0474021bbc253b974f49f8ca7f7133ad2acc792d))
+* add step ID mangling and output mapping for composite actions ([7193401](https://github.com/eoscloud/inline-actions/commit/719340154242ee5396a39f0b3d179623332e167c))
+
+
+### Bug Fixes
+
+* **ci:** add missing issues write permission to release workflow ([b287b5c](https://github.com/eoscloud/inline-actions/commit/b287b5c6ee1e6ed1b0a9b9c3e5fc2a5189d18a18))
+* **ci:** add missing issues write permission to release workflow ([cc0632b](https://github.com/eoscloud/inline-actions/commit/cc0632b85a38f9bd8bec4e27c69b92ba45d16223))
+* Drop duplicate prefix from release names ([#13](https://github.com/eoscloud/inline-actions/issues/13)) ([e67ba79](https://github.com/eoscloud/inline-actions/commit/e67ba79000dc1fe7c846c4039f2e9865ef37ab1e))
+
+
+### Testing
+
+* add pytest-based integration test suite ([7ab4d91](https://github.com/eoscloud/inline-actions/commit/7ab4d91aa8bf10d85649ba84d4b10dec6069dd21))
+* add unit tests for step ID mangling and output mapping ([f951262](https://github.com/eoscloud/inline-actions/commit/f951262a3f1e40a821bfaaac9c6a27cc679001ac))
+* improve coverage for scalar types and list refs in mangling ([73a6002](https://github.com/eoscloud/inline-actions/commit/73a6002c43cff0bf95f97aa8574ef5f2d51ec2ea))
+
 ## [1.2.0](https://github.com/eoscloud/inline-actions/compare/inline-actions-v1.1.1...inline-actions-v1.2.0) (2026-03-16)
 
 
