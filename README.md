@@ -184,7 +184,45 @@ Only these patterns are replaced during inlining:
 | `${{ inputs.X }}` | Resolved from `with:` values or action input defaults |
 | `${{ env.GITHUB_ACTION_PATH }}` | Workspace-relative path to the action directory |
 
-All other expressions (`${{ github.* }}`, `${{ secrets.* }}`, `${{ steps.* }}`, etc.) are preserved as-is.
+All other expressions (`${{ github.* }}`, `${{ secrets.* }}`, etc.) are preserved as-is.
+
+## Step ID Mangling & Output Mapping
+
+When a workflow step has an `id:` and uses a composite action, inline-actions mangles the internal step IDs to avoid collisions and rewrites output references so downstream steps can still access them.
+
+### Step ID mangling
+
+Internal step IDs are prefixed with `{workflow-step-id}--`:
+
+```yaml
+# Source workflow
+- name: Build
+  id: build
+  uses: ./actions/producer
+
+# If the action has a step with id: set-output, after inlining:
+- name: build artifact
+  id: build--set-output   # mangled
+  shell: bash
+  run: echo "url=..." >> "$GITHUB_OUTPUT"
+```
+
+Internal cross-references between steps within the same action are also updated to use the mangled IDs.
+
+When the workflow step has no `id:`, internal step IDs are left unchanged (there are no output references to rewrite).
+
+### Output mapping
+
+The action's `outputs` section declares how internal step outputs map to action-level outputs:
+
+```yaml
+# action.yml
+outputs:
+  url:
+    value: ${{ steps.set-output.outputs.url }}
+```
+
+After inlining, downstream references like `${{ steps.build.outputs.url }}` are rewritten to `${{ steps.build--set-output.outputs.url }}`, matching the mangled internal step ID. This happens automatically for all steps in the same job.
 
 ## Pre-commit Hook
 
@@ -279,4 +317,3 @@ uv run --project ../.. inline-actions --source-dir workflow-sources --output-dir
 ## Limitations
 
 - **Nested composite actions** are not supported — only top-level composite action references are inlined
-- **Step ID conflicts** are not automatically detected — ensure composite action step IDs don't conflict with workflow step IDs

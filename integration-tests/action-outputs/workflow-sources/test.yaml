@@ -1,0 +1,21 @@
+name: action-outputs-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: build
+        id: build
+        uses: ./actions/producer
+        with:
+          version: "2.0.0"
+      - name: deploy
+        uses: ./actions/consumer
+        with:
+          artifact_url: ${{ steps.build.outputs.url }}
+          checksum: ${{ steps.build.outputs.checksum }}

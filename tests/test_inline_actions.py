@@ -404,9 +404,10 @@ class TestInlineCompositeSteps:
     def test_basic_inlining(self):
         action = self._make_action([{"name": "step1", "run": "echo hello"}])
         step = {"uses": "./action", "with": {}}
-        result = mod.inline_composite_steps(action, step, "/ws/path")
+        result, mapping = mod.inline_composite_steps(action, step, "/ws/path")
         assert len(result) == 1
         assert result[0]["run"] == "echo hello"
+        assert mapping == {}
 
     def test_input_replacement(self):
         action = self._make_action(
@@ -414,13 +415,13 @@ class TestInlineCompositeSteps:
             inputs={"msg": {"default": "default_msg"}},
         )
         step = {"uses": "./action", "with": {"msg": "custom"}}
-        result = mod.inline_composite_steps(action, step, "/ws")
+        result, mapping = mod.inline_composite_steps(action, step, "/ws")
         assert result[0]["run"] == "echo custom"
 
     def test_action_path_replacement(self):
         action = self._make_action([{"run": "${{ env.GITHUB_ACTION_PATH }}/run.sh"}])
         step = {"uses": "./action"}
-        result = mod.inline_composite_steps(action, step, "my/action")
+        result, mapping = mod.inline_composite_steps(action, step, "my/action")
         assert result[0]["run"] == "my/action/run.sh"
 
     def test_deep_copy(self):
@@ -441,7 +442,7 @@ class TestInlineCompositeSteps:
                 {"name": "s3", "run": "echo 3"},
             ]
         )
-        result = mod.inline_composite_steps(action, {"uses": "./a"}, "/p")
+        result, mapping = mod.inline_composite_steps(action, {"uses": "./a"}, "/p")
         assert len(result) == 3
 
     def test_default_inputs_used(self):
@@ -450,7 +451,7 @@ class TestInlineCompositeSteps:
             inputs={"x": {"default": "fallback"}},
         )
         step = {"uses": "./a"}
-        result = mod.inline_composite_steps(action, step, "/p")
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
         assert result[0]["run"] == "echo fallback"
 
 
