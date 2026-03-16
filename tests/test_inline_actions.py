@@ -870,6 +870,65 @@ class TestProcessWorkflow:
         # Second step should have rewritten output reference
         assert steps[1]["run"] == "echo ${{ steps.build--set-output.outputs.url }}"
 
+    def test_rewrites_job_level_outputs(self, tmp_path):
+        """Job-level outputs referencing inlined step IDs are rewritten."""
+        action_dir = tmp_path / "producer"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: producer
+            outputs:
+              url:
+                value: ${{ steps.set-output.outputs.url }}
+              checksum:
+                value: ${{ steps.set-output.outputs.checksum }}
+            runs:
+              using: composite
+              steps:
+                - name: produce
+                  id: set-output
+                  run: echo "url=http://example.com" >> "$GITHUB_OUTPUT"
+        """)
+        )
+        workflow = {
+            "jobs": {
+                "build": {
+                    "outputs": {
+                        "url": "${{ steps.build.outputs.url }}",
+                        "checksum": "${{ steps.build.outputs.checksum }}",
+                    },
+                    "steps": [
+                        {
+                            "name": "build",
+                            "id": "build",
+                            "uses": f"./{action_dir.relative_to(tmp_path)}",
+                        },
+                    ],
+                },
+                "deploy": {
+                    "needs": ["build"],
+                    "steps": [
+                        {
+                            "name": "use output",
+                            "run": "echo ${{ needs.build.outputs.url }}",
+                        },
+                    ],
+                },
+            }
+        }
+        tracker = mod.RemoteActionTracker()
+        with patch("inline_actions.Path.cwd", return_value=tmp_path):
+            result = mod.process_workflow(workflow, None, tracker)
+        # Job-level outputs should reference mangled step IDs
+        job_outputs = result["jobs"]["build"]["outputs"]
+        assert job_outputs["url"] == "${{ steps.build--set-output.outputs.url }}"
+        assert (
+            job_outputs["checksum"] == "${{ steps.build--set-output.outputs.checksum }}"
+        )
+        # needs references in the other job should be left untouched
+        deploy_step = result["jobs"]["deploy"]["steps"][0]
+        assert deploy_step["run"] == "echo ${{ needs.build.outputs.url }}"
+
 
 # ---------------------------------------------------------------------------
 # resolve_action_dir
