@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/eoscloud/inline-actions/compare/v1.2.1...v1.2.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* also map internal output names in parse_output_mapping ([#17](https://github.com/eoscloud/inline-actions/issues/17)) ([b1dcae0](https://github.com/eoscloud/inline-actions/commit/b1dcae02075c97a3e02c6a8e4778ce046c790497))
+
 ## [1.2.1](https://github.com/eoscloud/inline-actions/compare/v1.2.0...v1.2.1) (2026-03-16)
 
 
