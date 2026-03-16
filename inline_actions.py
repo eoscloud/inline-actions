@@ -763,6 +763,14 @@ def process_workflow(
 
         job["steps"] = new_steps
 
+        # Phase 3: Rewrite job-level outputs that reference mangled step IDs
+        job_outputs = job.get("outputs")
+        if accumulated_mapping and job_outputs:
+            job["outputs"] = {
+                k: rewrite_step_output_refs_in_value(v, accumulated_mapping)
+                for k, v in job_outputs.items()
+            }
+
     return workflow
 
 
