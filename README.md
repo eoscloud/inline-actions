@@ -201,6 +201,12 @@ Add to your `.pre-commit-config.yaml`:
     - id: inline-actions
 ```
 
+To ensure that there are no conflicts with possible other pre-commit hooks, also add follwing line on top to `.pre-commit-config.yaml`:
+
+```yaml
+exclude: ^\.github/inline-actions/
+```
+
 When using the conventional `.github/workflow-sources` → `.github/workflows` layout, no `args` are needed. Add them only as required:
 
 ```yaml
