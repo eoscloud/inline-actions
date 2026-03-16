@@ -549,6 +549,47 @@ class TestParseOutputMapping:
         assert result == {}
         assert "warning: cannot parse output expression" in capsys.readouterr().err
 
+    def test_maps_internal_output_name_when_different(self):
+        """When declared name != internal output name, both are mapped."""
+        action = {
+            "outputs": {
+                "image_tags": {"value": "${{ steps.meta.outputs.tags }}"},
+            }
+        }
+        result = mod.parse_output_mapping(action, "build-image")
+        assert result == {
+            "steps.build-image.outputs.image_tags": "steps.build-image--meta.outputs.tags",
+            "steps.build-image.outputs.tags": "steps.build-image--meta.outputs.tags",
+        }
+
+    def test_no_duplicate_when_names_match(self):
+        """When declared name == internal output name, only one entry is created."""
+        action = {
+            "outputs": {
+                "tags": {"value": "${{ steps.meta.outputs.tags }}"},
+            }
+        }
+        result = mod.parse_output_mapping(action, "build")
+        assert result == {
+            "steps.build.outputs.tags": "steps.build--meta.outputs.tags",
+        }
+
+    def test_warns_on_conflicting_internal_names(self, capsys):
+        """When two outputs have different declared names but same internal name, warn."""
+        action = {
+            "outputs": {
+                "image_tags": {"value": "${{ steps.meta.outputs.result }}"},
+                "image_labels": {"value": "${{ steps.meta.outputs.result }}"},
+            }
+        }
+        result = mod.parse_output_mapping(action, "step")
+        # Both declared outputs should be mapped
+        assert "steps.step.outputs.image_tags" in result
+        assert "steps.step.outputs.image_labels" in result
+        # The internal name 'result' is added by the first output, the
+        # second output's attempt to add it should warn
+        assert "conflicting internal output name" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # mangle_step_ids
@@ -928,6 +969,61 @@ class TestProcessWorkflow:
         # needs references in the other job should be left untouched
         deploy_step = result["jobs"]["deploy"]["steps"][0]
         assert deploy_step["run"] == "echo ${{ needs.build.outputs.url }}"
+
+    def test_rewrites_internal_output_names_in_job_outputs(self, tmp_path):
+        """Job outputs referencing internal output names (not declared names) are rewritten."""
+        action_dir = tmp_path / "producer"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: producer
+            outputs:
+              image_tags:
+                value: ${{ steps.meta.outputs.tags }}
+            runs:
+              using: composite
+              steps:
+                - name: set metadata
+                  id: meta
+                  run: echo "tags=sha-abc" >> "$GITHUB_OUTPUT"
+        """)
+        )
+        workflow = {
+            "jobs": {
+                "build": {
+                    "outputs": {
+                        "image-tags": "${{ steps.build-image.outputs.tags }}",
+                    },
+                    "steps": [
+                        {
+                            "name": "build image",
+                            "id": "build-image",
+                            "uses": f"./{action_dir.relative_to(tmp_path)}",
+                        },
+                    ],
+                },
+                "deploy": {
+                    "needs": ["build"],
+                    "steps": [
+                        {
+                            "name": "deploy",
+                            "run": "echo ${{ needs.build.outputs.image-tags }}",
+                        },
+                    ],
+                },
+            }
+        }
+        tracker = mod.RemoteActionTracker()
+        with patch("inline_actions.Path.cwd", return_value=tmp_path):
+            result = mod.process_workflow(workflow, None, tracker)
+        # Job output should be rewritten using internal name mapping
+        job_outputs = result["jobs"]["build"]["outputs"]
+        assert (
+            job_outputs["image-tags"] == "${{ steps.build-image--meta.outputs.tags }}"
+        )
+        # needs references should be untouched
+        deploy_step = result["jobs"]["deploy"]["steps"][0]
+        assert deploy_step["run"] == "echo ${{ needs.build.outputs.image-tags }}"
 
 
 # ---------------------------------------------------------------------------

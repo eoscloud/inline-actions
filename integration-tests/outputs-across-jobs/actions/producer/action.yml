@@ -5,10 +5,10 @@ inputs:
     description: Version to build
     required: true
 outputs:
-  url:
+  artifact_url:
     description: Artifact URL
     value: ${{ steps.set-output.outputs.url }}
-  checksum:
+  artifact_checksum:
     description: Artifact checksum
     value: ${{ steps.set-output.outputs.checksum }}
 runs:
