@@ -404,9 +404,10 @@ class TestInlineCompositeSteps:
     def test_basic_inlining(self):
         action = self._make_action([{"name": "step1", "run": "echo hello"}])
         step = {"uses": "./action", "with": {}}
-        result = mod.inline_composite_steps(action, step, "/ws/path")
+        result, mapping = mod.inline_composite_steps(action, step, "/ws/path")
         assert len(result) == 1
         assert result[0]["run"] == "echo hello"
+        assert mapping == {}
 
     def test_input_replacement(self):
         action = self._make_action(
@@ -414,13 +415,13 @@ class TestInlineCompositeSteps:
             inputs={"msg": {"default": "default_msg"}},
         )
         step = {"uses": "./action", "with": {"msg": "custom"}}
-        result = mod.inline_composite_steps(action, step, "/ws")
+        result, mapping = mod.inline_composite_steps(action, step, "/ws")
         assert result[0]["run"] == "echo custom"
 
     def test_action_path_replacement(self):
         action = self._make_action([{"run": "${{ env.GITHUB_ACTION_PATH }}/run.sh"}])
         step = {"uses": "./action"}
-        result = mod.inline_composite_steps(action, step, "my/action")
+        result, mapping = mod.inline_composite_steps(action, step, "my/action")
         assert result[0]["run"] == "my/action/run.sh"
 
     def test_deep_copy(self):
@@ -441,7 +442,7 @@ class TestInlineCompositeSteps:
                 {"name": "s3", "run": "echo 3"},
             ]
         )
-        result = mod.inline_composite_steps(action, {"uses": "./a"}, "/p")
+        result, mapping = mod.inline_composite_steps(action, {"uses": "./a"}, "/p")
         assert len(result) == 3
 
     def test_default_inputs_used(self):
@@ -450,8 +451,285 @@ class TestInlineCompositeSteps:
             inputs={"x": {"default": "fallback"}},
         )
         step = {"uses": "./a"}
-        result = mod.inline_composite_steps(action, step, "/p")
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
         assert result[0]["run"] == "echo fallback"
+
+    def test_mangles_ids_when_step_has_id(self):
+        action = self._make_action(
+            [{"name": "s1", "id": "internal", "run": "echo hi"}],
+        )
+        action["outputs"] = {
+            "result": {
+                "description": "The result",
+                "value": "${{ steps.internal.outputs.result }}",
+            }
+        }
+        step = {"uses": "./a", "id": "build"}
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
+        assert result[0]["id"] == "build--internal"
+        assert mapping == {
+            "steps.build.outputs.result": "steps.build--internal.outputs.result"
+        }
+
+    def test_no_mangling_without_step_id(self):
+        action = self._make_action(
+            [{"name": "s1", "id": "internal", "run": "echo hi"}],
+        )
+        step = {"uses": "./a"}
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
+        assert result[0]["id"] == "internal"
+        assert mapping == {}
+
+    def test_mangles_internal_cross_references(self):
+        action = self._make_action(
+            [
+                {"name": "s1", "id": "first", "run": "echo one"},
+                {
+                    "name": "s2",
+                    "id": "second",
+                    "run": "echo ${{ steps.first.outputs.val }}",
+                },
+            ],
+        )
+        step = {"uses": "./a", "id": "build"}
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
+        assert result[0]["id"] == "build--first"
+        assert result[1]["id"] == "build--second"
+        assert result[1]["run"] == "echo ${{ steps.build--first.outputs.val }}"
+
+
+# ---------------------------------------------------------------------------
+# parse_output_mapping
+# ---------------------------------------------------------------------------
+
+
+class TestParseOutputMapping:
+    def test_basic_mapping(self):
+        action = {
+            "outputs": {
+                "url": {
+                    "description": "Artifact URL",
+                    "value": "${{ steps.set-output.outputs.url }}",
+                },
+            }
+        }
+        result = mod.parse_output_mapping(action, "build")
+        assert result == {
+            "steps.build.outputs.url": "steps.build--set-output.outputs.url"
+        }
+
+    def test_multiple_outputs(self):
+        action = {
+            "outputs": {
+                "url": {"value": "${{ steps.set-output.outputs.url }}"},
+                "checksum": {"value": "${{ steps.set-output.outputs.checksum }}"},
+            }
+        }
+        result = mod.parse_output_mapping(action, "build")
+        assert result == {
+            "steps.build.outputs.url": "steps.build--set-output.outputs.url",
+            "steps.build.outputs.checksum": "steps.build--set-output.outputs.checksum",
+        }
+
+    def test_no_outputs(self):
+        assert mod.parse_output_mapping({}, "build") == {}
+        assert mod.parse_output_mapping({"outputs": None}, "build") == {}
+
+    def test_skips_non_dict_spec(self):
+        action = {"outputs": {"url": "plain string"}}
+        assert mod.parse_output_mapping(action, "build") == {}
+
+    def test_skips_non_string_value(self):
+        action = {"outputs": {"url": {"value": 42}}}
+        assert mod.parse_output_mapping(action, "build") == {}
+
+    def test_warns_on_unparseable_expression(self, capsys):
+        action = {"outputs": {"url": {"value": "some-literal-value"}}}
+        result = mod.parse_output_mapping(action, "build")
+        assert result == {}
+        assert "warning: cannot parse output expression" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# mangle_step_ids
+# ---------------------------------------------------------------------------
+
+
+class TestMangleStepIds:
+    def test_prefixes_ids(self):
+        steps = [{"id": "a", "run": "echo"}, {"id": "b", "run": "echo"}]
+        result = mod.mangle_step_ids(steps, "build")
+        assert result[0]["id"] == "build--a"
+        assert result[1]["id"] == "build--b"
+
+    def test_steps_without_ids_unchanged(self):
+        steps = [{"name": "no id", "run": "echo"}]
+        result = mod.mangle_step_ids(steps, "build")
+        assert "id" not in result[0]
+        assert result[0]["run"] == "echo"
+
+    def test_rewrites_internal_cross_references(self):
+        steps = [
+            {"id": "first", "run": "echo one"},
+            {"id": "second", "run": "echo ${{ steps.first.outputs.val }}"},
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[1]["run"] == "echo ${{ steps.pfx--first.outputs.val }}"
+
+    def test_preserves_non_matching_refs(self):
+        steps = [
+            {"id": "a", "run": "echo ${{ steps.external.outputs.val }}"},
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[0]["run"] == "echo ${{ steps.external.outputs.val }}"
+
+    def test_rewrites_in_nested_values(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "name": "b",
+                "env": {"URL": "${{ steps.a.outputs.url }}"},
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[1]["env"]["URL"] == "${{ steps.pfx--a.outputs.url }}"
+
+    def test_rewrites_in_list_values(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "name": "b",
+                "args": ["${{ steps.a.outputs.url }}", "literal"],
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[1]["args"] == ["${{ steps.pfx--a.outputs.url }}", "literal"]
+
+    def test_rewrites_folded_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": FoldedScalarString("echo ${{ steps.a.outputs.url }}\n"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], FoldedScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_rewrites_literal_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": LiteralScalarString("echo ${{ steps.a.outputs.url }}\n"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], LiteralScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_rewrites_single_quoted_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": SingleQuotedScalarString("echo ${{ steps.a.outputs.url }}"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], SingleQuotedScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_non_string_values_passthrough(self):
+        steps = [
+            {"id": "a", "timeout": 30, "continue-on-error": True},
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[0]["timeout"] == 30
+        assert result[0]["continue-on-error"] is True
+
+
+# ---------------------------------------------------------------------------
+# rewrite_step_output_refs
+# ---------------------------------------------------------------------------
+
+
+class TestRewriteStepOutputRefs:
+    def test_basic_rewrite(self):
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        result = mod.rewrite_step_output_refs("${{ steps.build.outputs.url }}", mapping)
+        assert result == "${{ steps.build--internal.outputs.url }}"
+
+    def test_no_match_preserved(self):
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        result = mod.rewrite_step_output_refs("${{ steps.other.outputs.val }}", mapping)
+        assert result == "${{ steps.other.outputs.val }}"
+
+    def test_preserves_folded_scalar(self):
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        value = FoldedScalarString("${{ steps.build.outputs.url }}")
+        result = mod.rewrite_step_output_refs(value, mapping)
+        assert isinstance(result, FoldedScalarString)
+        assert str(result) == "${{ steps.build--internal.outputs.url }}"
+
+    def test_preserves_literal_scalar(self):
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        value = LiteralScalarString("${{ steps.build.outputs.url }}")
+        result = mod.rewrite_step_output_refs(value, mapping)
+        assert isinstance(result, LiteralScalarString)
+
+    def test_preserves_single_quoted_scalar(self):
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        value = SingleQuotedScalarString("${{ steps.build.outputs.url }}")
+        result = mod.rewrite_step_output_refs(value, mapping)
+        assert isinstance(result, SingleQuotedScalarString)
+
+    def test_multiple_refs_in_one_string(self):
+        mapping = {
+            "steps.build.outputs.url": "steps.build--s.outputs.url",
+            "steps.build.outputs.checksum": "steps.build--s.outputs.checksum",
+        }
+        result = mod.rewrite_step_output_refs(
+            "${{ steps.build.outputs.url }} ${{ steps.build.outputs.checksum }}",
+            mapping,
+        )
+        assert (
+            result
+            == "${{ steps.build--s.outputs.url }} ${{ steps.build--s.outputs.checksum }}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# rewrite_step_output_refs_in_value
+# ---------------------------------------------------------------------------
+
+
+class TestRewriteStepOutputRefsInValue:
+    def _mapping(self):
+        return {"steps.build.outputs.url": "steps.build--s.outputs.url"}
+
+    def test_string(self):
+        result = mod.rewrite_step_output_refs_in_value(
+            "${{ steps.build.outputs.url }}", self._mapping()
+        )
+        assert result == "${{ steps.build--s.outputs.url }}"
+
+    def test_dict(self):
+        result = mod.rewrite_step_output_refs_in_value(
+            {"env": "${{ steps.build.outputs.url }}"}, self._mapping()
+        )
+        assert result == {"env": "${{ steps.build--s.outputs.url }}"}
+
+    def test_list(self):
+        result = mod.rewrite_step_output_refs_in_value(
+            ["${{ steps.build.outputs.url }}"], self._mapping()
+        )
+        assert result == ["${{ steps.build--s.outputs.url }}"]
+
+    def test_non_string_passthrough(self):
+        assert mod.rewrite_step_output_refs_in_value(42, self._mapping()) == 42
+        assert mod.rewrite_step_output_refs_in_value(True, self._mapping()) is True
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +825,50 @@ class TestProcessWorkflow:
         tracker = mod.RemoteActionTracker()
         result = mod.process_workflow(workflow, None, tracker)
         assert result["jobs"] == {}
+
+    def test_rewrites_output_refs_after_inlining(self, tmp_path):
+        """Output references are rewritten to use mangled step IDs."""
+        action_dir = tmp_path / "producer"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: producer
+            outputs:
+              url:
+                value: ${{ steps.set-output.outputs.url }}
+            runs:
+              using: composite
+              steps:
+                - name: produce
+                  id: set-output
+                  run: echo "url=http://example.com" >> "$GITHUB_OUTPUT"
+        """)
+        )
+        workflow = {
+            "jobs": {
+                "deploy": {
+                    "steps": [
+                        {
+                            "name": "build",
+                            "id": "build",
+                            "uses": f"./{action_dir.relative_to(tmp_path)}",
+                        },
+                        {
+                            "name": "use output",
+                            "run": "echo ${{ steps.build.outputs.url }}",
+                        },
+                    ]
+                }
+            }
+        }
+        tracker = mod.RemoteActionTracker()
+        with patch("inline_actions.Path.cwd", return_value=tmp_path):
+            result = mod.process_workflow(workflow, None, tracker)
+        steps = result["jobs"]["deploy"]["steps"]
+        # First step should have mangled ID
+        assert steps[0]["id"] == "build--set-output"
+        # Second step should have rewritten output reference
+        assert steps[1]["run"] == "echo ${{ steps.build--set-output.outputs.url }}"
 
 
 # ---------------------------------------------------------------------------

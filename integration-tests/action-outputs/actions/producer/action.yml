@@ -1,0 +1,23 @@
+name: producer
+description: Produces build artifacts and outputs metadata
+inputs:
+  version:
+    description: Version to build
+    required: true
+outputs:
+  url:
+    description: Artifact URL
+    value: ${{ steps.set-output.outputs.url }}
+  checksum:
+    description: Artifact checksum
+    value: ${{ steps.set-output.outputs.checksum }}
+runs:
+  using: composite
+  steps:
+    - name: build artifact
+      id: set-output
+      shell: bash
+      run: |
+        echo "Building version ${{ inputs.version }}"
+        echo "url=https://artifacts.example.com/${{ inputs.version }}/app.tar.gz" >> "$GITHUB_OUTPUT"
+        echo "checksum=abc123" >> "$GITHUB_OUTPUT"

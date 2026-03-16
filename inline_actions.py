@@ -500,14 +500,171 @@ def replace_expressions_in_value(value, inputs: dict[str, str], action_path: str
 
 
 # ---------------------------------------------------------------------------
+# Step ID mangling & output mapping
+# ---------------------------------------------------------------------------
+
+# Pattern matching ${{ steps.X.outputs.Y }} expressions
+_STEP_OUTPUT_RE = re.compile(
+    r"\$\{\{\s*steps\.([a-zA-Z_][\w-]*)\.outputs\.([a-zA-Z_][\w-]*)\s*\}\}"
+)
+
+
+def parse_output_mapping(action: dict, workflow_step_id: str) -> dict[str, str]:
+    """Build a mapping from workflow-level output refs to mangled internal refs.
+
+    Given an action with outputs like:
+        url: ${{ steps.set-output.outputs.url }}
+    and workflow_step_id='build', returns:
+        {"steps.build.outputs.url": "steps.build--set-output.outputs.url"}
+    """
+    outputs = action.get("outputs") or {}
+    mapping: dict[str, str] = {}
+
+    for output_name, spec in outputs.items():
+        if not isinstance(spec, dict):
+            continue
+        value = spec.get("value", "")
+        if not isinstance(value, str):
+            continue
+        m = _STEP_OUTPUT_RE.search(value)
+        if m is None:
+            print(
+                f"  warning: cannot parse output expression for '{output_name}': {value}",
+                file=sys.stderr,
+            )
+            continue
+        internal_step_id = m.group(1)
+        internal_output_name = m.group(2)
+        # Map steps.{workflow_step_id}.outputs.{output_name}
+        #   -> steps.{workflow_step_id}--{internal_step_id}.outputs.{internal_output_name}
+        from_ref = f"steps.{workflow_step_id}.outputs.{output_name}"
+        to_ref = f"steps.{workflow_step_id}--{internal_step_id}.outputs.{internal_output_name}"
+        mapping[from_ref] = to_ref
+
+    return mapping
+
+
+def mangle_step_ids(steps: list[dict], prefix: str) -> list[dict]:
+    """Prefix all step IDs with ``{prefix}--`` and update internal cross-references."""
+    # Collect original IDs that will be mangled
+    original_ids: set[str] = set()
+    for step in steps:
+        step_id = step.get("id")
+        if step_id:
+            original_ids.add(str(step_id))
+
+    # Build internal ref mapping: steps.X.outputs.Y -> steps.prefix--X.outputs.Y
+    id_mapping: dict[str, str] = {}
+    for oid in original_ids:
+        id_mapping[oid] = f"{prefix}--{oid}"
+
+    mangled: list[dict] = []
+    for step in steps:
+        new_step = dict(step)
+        # Mangle the id field
+        step_id = new_step.get("id")
+        if step_id and str(step_id) in id_mapping:
+            new_step["id"] = id_mapping[str(step_id)]
+
+        # Rewrite internal cross-references in all values
+        if id_mapping:
+            for key in list(new_step.keys()):
+                if key == "id":
+                    continue
+                new_step[key] = _rewrite_internal_refs_in_value(
+                    new_step[key], id_mapping
+                )
+
+        mangled.append(new_step)
+
+    return mangled
+
+
+def _rewrite_internal_refs_in_value(value, id_mapping: dict[str, str]):
+    """Rewrite ${{ steps.X.outputs.Y }} where X is in id_mapping."""
+    if isinstance(value, str):
+        return _rewrite_internal_refs(value, id_mapping)
+    if isinstance(value, dict):
+        return {
+            k: _rewrite_internal_refs_in_value(v, id_mapping) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_rewrite_internal_refs_in_value(item, id_mapping) for item in value]
+    return value
+
+
+def _rewrite_internal_refs(value: str, id_mapping: dict[str, str]) -> str:
+    """Rewrite step output references in a string where the step ID is in id_mapping."""
+    original_type = type(value)
+
+    def replace_match(m: re.Match) -> str:
+        step_id = m.group(1)
+        if step_id in id_mapping:
+            return m.group(0).replace(
+                f"steps.{step_id}.outputs.", f"steps.{id_mapping[step_id]}.outputs."
+            )
+        return m.group(0)
+
+    result = _STEP_OUTPUT_RE.sub(replace_match, str(value))
+
+    if isinstance(value, FoldedScalarString):
+        return FoldedScalarString(result)
+    if isinstance(value, LiteralScalarString):
+        return LiteralScalarString(result)
+    if isinstance(value, ScalarString):
+        return original_type(result)
+    return result
+
+
+def rewrite_step_output_refs(value: str, mapping: dict[str, str]) -> str:
+    """Replace ${{ steps.X.outputs.Y }} using the output mapping.
+
+    Preserves ruamel.yaml scalar string types.
+    """
+    original_type = type(value)
+
+    def replace_match(m: re.Match) -> str:
+        ref = f"steps.{m.group(1)}.outputs.{m.group(2)}"
+        if ref in mapping:
+            return m.group(0).replace(ref, mapping[ref])
+        return m.group(0)
+
+    result = _STEP_OUTPUT_RE.sub(replace_match, str(value))
+
+    if isinstance(value, FoldedScalarString):
+        return FoldedScalarString(result)
+    if isinstance(value, LiteralScalarString):
+        return LiteralScalarString(result)
+    if isinstance(value, ScalarString):
+        return original_type(result)
+    return result
+
+
+def rewrite_step_output_refs_in_value(value, mapping: dict[str, str]):
+    """Recursively rewrite step output references in a YAML value."""
+    if isinstance(value, str):
+        return rewrite_step_output_refs(value, mapping)
+    if isinstance(value, dict):
+        return {
+            k: rewrite_step_output_refs_in_value(v, mapping) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [rewrite_step_output_refs_in_value(item, mapping) for item in value]
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Inlining
 # ---------------------------------------------------------------------------
 
 
 def inline_composite_steps(
     action: dict, step: dict, workspace_rel_path: str
-) -> list[dict]:
-    """Expand a composite action's steps, replacing expressions."""
+) -> tuple[list[dict], dict[str, str]]:
+    """Expand a composite action's steps, replacing expressions.
+
+    Returns (inlined_steps, output_mapping).
+    """
     inputs = resolve_inputs(action, step.get("with"))
     action_steps = action.get("runs", {}).get("steps", [])
     inlined: list[dict] = []
@@ -522,7 +679,15 @@ def inline_composite_steps(
             )
         inlined.append(new_step)
 
-    return inlined
+    # Mangle step IDs and build output mapping if the workflow step has an id
+    workflow_step_id = step.get("id")
+    output_mapping: dict[str, str] = {}
+    if workflow_step_id:
+        workflow_step_id = str(workflow_step_id)
+        inlined = mangle_step_ids(inlined, workflow_step_id)
+        output_mapping = parse_output_mapping(action, workflow_step_id)
+
+    return inlined, output_mapping
 
 
 def inline_step(
@@ -531,11 +696,11 @@ def inline_step(
     tracker: RemoteActionTracker,
     inline_actions_dir: str = DEFAULT_INLINE_ACTIONS_DIR,
     locked_entries: dict[str, dict[str, str]] | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, str]]:
     """Inline a single step if it uses a composite action, else return as-is."""
     uses = step.get("uses")
     if not uses or not isinstance(uses, str):
-        return [step]
+        return [step], {}
 
     uses_str = str(uses)
 
@@ -549,13 +714,13 @@ def inline_step(
         )
 
     if resolved is None:
-        return [step]
+        return [step], {}
 
     action_dir, workspace_rel_path = resolved
     action = load_action(action_dir)
 
     if action.get("runs", {}).get("using") != "composite":
-        return [step]
+        return [step], {}
 
     return inline_composite_steps(action, step, workspace_rel_path)
 
@@ -574,12 +739,28 @@ def process_workflow(
     for job_name, job in jobs.items():
         steps = job.get("steps", [])
         new_steps: list[dict] = []
+        accumulated_mapping: dict[str, str] = {}
+
+        # Phase 1: Inline all steps and accumulate output mappings
         for step in steps:
-            new_steps.extend(
-                inline_step(
-                    step, git_resolver, tracker, inline_actions_dir, locked_entries
-                )
+            inlined_steps, mapping = inline_step(
+                step, git_resolver, tracker, inline_actions_dir, locked_entries
             )
+            new_steps.extend(inlined_steps)
+            accumulated_mapping.update(mapping)
+
+        # Phase 2: Rewrite output references using accumulated mapping
+        if accumulated_mapping:
+            rewritten_steps: list[dict] = []
+            for s in new_steps:
+                rewritten = {}
+                for key, val in s.items():
+                    rewritten[key] = rewrite_step_output_refs_in_value(
+                        val, accumulated_mapping
+                    )
+                rewritten_steps.append(rewritten)
+            new_steps = rewritten_steps
+
         job["steps"] = new_steps
 
     return workflow
