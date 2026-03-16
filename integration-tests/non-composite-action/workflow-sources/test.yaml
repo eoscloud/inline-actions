@@ -1,0 +1,15 @@
+name: non-composite-action-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: run js action
+        uses: ./actions/js-action
+        with:
+          who: Test

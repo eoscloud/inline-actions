@@ -1,0 +1,19 @@
+name: deploy
+description: Deploy the application
+inputs:
+  target:
+    description: Deployment target
+    required: true
+  version:
+    description: Version to deploy
+    default: latest
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: build artifacts
+      shell: bash
+      run: echo "Building version ${{ inputs.version }}"
+    - name: push to target
+      shell: bash
+      run: echo "Deploying ${{ inputs.version }} to ${{ inputs.target }}"

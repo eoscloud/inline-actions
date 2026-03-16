@@ -1,0 +1,16 @@
+name: nested-with-values-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: run complex action
+        uses: ./actions/complex-inputs
+        with:
+          command: "deploy --env ${{ github.ref_name }}"
+          env_name: "${{ github.event.inputs.environment }}"

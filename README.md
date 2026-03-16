@@ -243,6 +243,39 @@ For workflows using local `uses: ./` references, the referenced actions must be 
 
 This project was developed with AI assistance. Such assistance is reflected in the git history via `Co-Authored-By` commit trailers.
 
+### Running Tests
+
+Unit tests:
+
+```bash
+uv run pytest
+```
+
+Integration tests:
+
+```bash
+uv run pytest integration-tests/ -v --no-cov
+```
+
+Integration test cases live under `integration-tests/`. Each subdirectory is a self-contained test case with the following structure:
+
+```
+integration-tests/<case-name>/
+├── actions/              # local composite actions (optional)
+├── workflow-sources/     # input workflow files
+└── expected/
+    └── workflows/        # expected output after inlining
+```
+
+The test runner discovers cases automatically, runs `inline-actions` from the case directory, and diffs the output against `expected/workflows/`.
+
+To add a new test case, create a new subdirectory following this layout. Generate the expected output with:
+
+```bash
+cd integration-tests/<case-name>
+uv run --project ../.. inline-actions --source-dir workflow-sources --output-dir expected/workflows
+```
+
 ## Limitations
 
 - **Nested composite actions** are not supported — only top-level composite action references are inlined

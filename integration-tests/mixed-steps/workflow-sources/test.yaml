@@ -1,0 +1,19 @@
+name: mixed-steps-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: prepare
+        run: echo "Preparing workspace"
+      - name: build release
+        uses: ./actions/build
+        with:
+          mode: release
+      - name: upload artifacts
+        run: echo "Uploading artifacts"

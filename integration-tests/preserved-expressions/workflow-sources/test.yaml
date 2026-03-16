@@ -1,0 +1,15 @@
+name: preserved-expressions-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: build app
+        uses: ./actions/mixed-expressions
+        with:
+          app_name: testapp

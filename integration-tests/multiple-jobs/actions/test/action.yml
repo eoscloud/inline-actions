@@ -1,0 +1,12 @@
+name: test
+description: Run tests
+inputs:
+  suite:
+    description: Test suite to run
+    default: unit
+runs:
+  using: composite
+  steps:
+    - name: run tests
+      shell: bash
+      run: echo "Running ${{ inputs.suite }} tests"

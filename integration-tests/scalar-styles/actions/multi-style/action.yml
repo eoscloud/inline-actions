@@ -1,0 +1,24 @@
+name: multi-style
+description: Action with various YAML scalar styles
+inputs:
+  target:
+    description: Build target
+    default: release
+runs:
+  using: composite
+  steps:
+    - name: literal block
+      shell: bash
+      run: |
+        echo "Step 1: preparing ${{ inputs.target }}"
+        echo "Step 2: building"
+        echo "Step 3: done"
+    - name: folded block
+      shell: bash
+      run: >
+        echo "This is a long command
+        for ${{ inputs.target }}
+        that spans multiple lines"
+    - name: plain string
+      shell: bash
+      run: echo "simple ${{ inputs.target }}"

@@ -1,0 +1,15 @@
+name: notify
+description: Send a notification
+inputs:
+  channel:
+    description: Channel to notify
+    default: general
+  message:
+    description: Notification message
+    default: Build completed
+runs:
+  using: composite
+  steps:
+    - name: send notification
+      shell: bash
+      run: echo "Sending to #${{ inputs.channel }}: ${{ inputs.message }}"

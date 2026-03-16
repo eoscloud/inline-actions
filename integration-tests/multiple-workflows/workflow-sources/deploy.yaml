@@ -1,0 +1,13 @@
+name: deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: verify target
+        uses: ./actions/ping
+        with:
+          host: prod.example.com

@@ -1,0 +1,16 @@
+name: setup
+description: Set up the environment
+inputs:
+  env:
+    description: Environment name
+    default: dev
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: configure environment
+      shell: bash
+      run: echo "Configuring environment ${{ inputs.env }}"
+    - name: install dependencies
+      shell: bash
+      run: echo "Installing dependencies for ${{ inputs.env }}"
