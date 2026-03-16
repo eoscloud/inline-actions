@@ -516,6 +516,11 @@ def parse_output_mapping(action: dict, workflow_step_id: str) -> dict[str, str]:
         url: ${{ steps.set-output.outputs.url }}
     and workflow_step_id='build', returns:
         {"steps.build.outputs.url": "steps.build--set-output.outputs.url"}
+
+    When the declared output name differs from the internal output name,
+    an additional mapping is created for the internal name.  This handles
+    runtimes (e.g. Gitea ACT) where composite action step outputs leak
+    through under their original names.
     """
     outputs = action.get("outputs") or {}
     mapping: dict[str, str] = {}
@@ -540,6 +545,22 @@ def parse_output_mapping(action: dict, workflow_step_id: str) -> dict[str, str]:
         from_ref = f"steps.{workflow_step_id}.outputs.{output_name}"
         to_ref = f"steps.{workflow_step_id}--{internal_step_id}.outputs.{internal_output_name}"
         mapping[from_ref] = to_ref
+
+        # Also map the internal output name when it differs from the declared
+        # name, so references using the leaked internal name are rewritten too.
+        if internal_output_name != output_name:
+            internal_from_ref = (
+                f"steps.{workflow_step_id}.outputs.{internal_output_name}"
+            )
+            if internal_from_ref not in mapping:
+                mapping[internal_from_ref] = to_ref
+            else:
+                print(
+                    f"  warning: conflicting internal output name "
+                    f"'{internal_output_name}' for step '{workflow_step_id}' "
+                    f"(already mapped by another output)",
+                    file=sys.stderr,
+                )
 
     return mapping
 
