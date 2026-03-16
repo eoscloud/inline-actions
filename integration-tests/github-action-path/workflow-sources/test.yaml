@@ -1,0 +1,15 @@
+name: github-action-path-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: run deploy script
+        uses: ./actions/run-script
+        with:
+          script: deploy.sh

@@ -1,0 +1,16 @@
+name: greet
+description: A simple greeting action
+inputs:
+  name:
+    description: Name to greet
+    default: World
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: greet
+      shell: bash
+      run: echo "Hello, ${{ inputs.name }}!"
+    - name: farewell
+      shell: bash
+      run: echo "Goodbye, ${{ inputs.name }}!"

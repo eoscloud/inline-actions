@@ -1,0 +1,15 @@
+name: simple-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: greet the world
+        uses: ./actions/greet
+        with:
+          name: Integration Test

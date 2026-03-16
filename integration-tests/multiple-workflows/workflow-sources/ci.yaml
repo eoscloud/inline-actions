@@ -1,0 +1,12 @@
+name: ci
+on: push
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: health check
+        uses: ./actions/ping
+        with:
+          host: ci.example.com

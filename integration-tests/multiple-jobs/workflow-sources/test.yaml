@@ -1,0 +1,23 @@
+name: multiple-jobs-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: lint code
+        uses: ./actions/lint
+        with:
+          config: .eslintrc
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: run integration tests
+        uses: ./actions/test
+        with:
+          suite: integration

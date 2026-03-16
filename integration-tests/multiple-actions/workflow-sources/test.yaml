@@ -1,0 +1,20 @@
+name: multiple-actions-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: setup staging
+        uses: ./actions/setup
+        with:
+          env: staging
+      - name: deploy to staging
+        uses: ./actions/deploy
+        with:
+          target: staging.example.com
+          version: "1.2.3"

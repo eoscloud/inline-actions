@@ -1,0 +1,13 @@
+name: default-inputs-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: send default notification
+        uses: ./actions/notify

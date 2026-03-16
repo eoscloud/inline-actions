@@ -1,0 +1,15 @@
+name: run-script
+description: Run a script from the action directory
+inputs:
+  script:
+    description: Script name to run
+    default: build.sh
+runs:
+  using: composite
+  steps:
+    - name: run script
+      shell: bash
+      run: bash ${{ env.GITHUB_ACTION_PATH }}/${{ inputs.script }}
+    - name: show action path
+      shell: bash
+      run: echo "Action located at ${{ env.GITHUB_ACTION_PATH }}"

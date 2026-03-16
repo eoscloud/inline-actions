@@ -1,0 +1,12 @@
+name: ping
+description: Ping a service
+inputs:
+  host:
+    description: Host to ping
+    default: localhost
+runs:
+  using: composite
+  steps:
+    - name: ping host
+      shell: bash
+      run: echo "Pinging ${{ inputs.host }}"

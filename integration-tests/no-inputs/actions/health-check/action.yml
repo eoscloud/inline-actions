@@ -1,0 +1,11 @@
+name: health-check
+description: Run a health check
+runs:
+  using: composite
+  steps:
+    - name: check api
+      shell: bash
+      run: echo "Checking API health"
+    - name: check database
+      shell: bash
+      run: echo "Checking database connectivity"

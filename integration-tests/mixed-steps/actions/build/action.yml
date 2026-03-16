@@ -1,0 +1,15 @@
+name: build
+description: Build the project
+inputs:
+  mode:
+    description: Build mode
+    default: debug
+runs:
+  using: composite
+  steps:
+    - name: compile
+      shell: bash
+      run: echo "Compiling in ${{ inputs.mode }} mode"
+    - name: package
+      shell: bash
+      run: echo "Packaging ${{ inputs.mode }} build"

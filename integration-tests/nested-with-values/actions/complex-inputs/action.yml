@@ -1,0 +1,17 @@
+name: complex-inputs
+description: Action with complex input handling
+inputs:
+  command:
+    description: Command to execute
+    required: true
+  env_name:
+    description: Environment name
+    default: dev
+runs:
+  using: composite
+  steps:
+    - name: execute command
+      shell: bash
+      run: |
+        echo "Environment: ${{ inputs.env_name }}"
+        echo "Running: ${{ inputs.command }}"

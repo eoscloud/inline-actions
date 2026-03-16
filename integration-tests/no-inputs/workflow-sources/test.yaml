@@ -1,0 +1,13 @@
+name: no-inputs-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: run health check
+        uses: ./actions/health-check

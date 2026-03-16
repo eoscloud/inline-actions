@@ -1,0 +1,12 @@
+name: lint
+description: Run linter
+inputs:
+  config:
+    description: Lint config file
+    default: .lintrc
+runs:
+  using: composite
+  steps:
+    - name: run linter
+      shell: bash
+      run: echo "Linting with config ${{ inputs.config }}"

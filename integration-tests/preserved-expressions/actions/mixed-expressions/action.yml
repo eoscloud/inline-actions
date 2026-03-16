@@ -1,0 +1,18 @@
+name: mixed-expressions
+description: Action mixing input and other expressions
+inputs:
+  app_name:
+    description: Application name
+    default: myapp
+runs:
+  using: composite
+  steps:
+    - name: build with context
+      shell: bash
+      run: echo "Building ${{ inputs.app_name }} on ${{ github.ref }}"
+    - name: use secrets
+      shell: bash
+      run: echo "Token is ${{ secrets.DEPLOY_TOKEN }}"
+    - name: reference other steps
+      shell: bash
+      run: echo "Previous result was ${{ steps.build.outputs.result }}"

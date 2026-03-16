@@ -1,0 +1,9 @@
+name: js-action
+description: A JavaScript action
+inputs:
+  who:
+    description: Who to greet
+    default: World
+runs:
+  using: node20
+  main: index.js
