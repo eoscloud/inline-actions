@@ -594,6 +594,61 @@ class TestMangleStepIds:
         result = mod.mangle_step_ids(steps, "pfx")
         assert result[1]["env"]["URL"] == "${{ steps.pfx--a.outputs.url }}"
 
+    def test_rewrites_in_list_values(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "name": "b",
+                "args": ["${{ steps.a.outputs.url }}", "literal"],
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[1]["args"] == ["${{ steps.pfx--a.outputs.url }}", "literal"]
+
+    def test_rewrites_folded_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": FoldedScalarString("echo ${{ steps.a.outputs.url }}\n"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], FoldedScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_rewrites_literal_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": LiteralScalarString("echo ${{ steps.a.outputs.url }}\n"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], LiteralScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_rewrites_single_quoted_scalar_refs(self):
+        steps = [
+            {"id": "a", "run": "echo"},
+            {
+                "id": "b",
+                "run": SingleQuotedScalarString("echo ${{ steps.a.outputs.url }}"),
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert isinstance(result[1]["run"], SingleQuotedScalarString)
+        assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
+
+    def test_non_string_values_passthrough(self):
+        steps = [
+            {"id": "a", "timeout": 30, "continue-on-error": True},
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert result[0]["timeout"] == 30
+        assert result[0]["continue-on-error"] is True
+
 
 # ---------------------------------------------------------------------------
 # rewrite_step_output_refs
