@@ -1,0 +1,29 @@
+name: build
+description: Action with complex input expressions in steps
+inputs:
+  local_registry_push:
+    description: Whether to push to local registry
+    default: 'false'
+  local_registry:
+    description: Local registry URL
+    default: localhost:5000
+  image_name:
+    description: Image name
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: set image metadata
+      id: meta
+      shell: bash
+      run: echo "version=latest" >> "$GITHUB_OUTPUT"
+    - name: determine images
+      shell: bash
+      run: |
+        IMAGES="${{ inputs.local_registry_push == 'true' && format('{0}/{1}', inputs.local_registry, inputs.image_name) || '' }}"
+        echo "images=$IMAGES"
+    - name: build and push
+      shell: bash
+      run: |
+        PUSH="${{ github.ref == format('refs/heads/{0}', 'main') || inputs.local_registry_push == 'true' }}"
+        echo "push=$PUSH"

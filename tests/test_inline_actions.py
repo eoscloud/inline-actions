@@ -305,6 +305,98 @@ class TestReplaceExpressions:
         result = mod.replace_expressions("${{  inputs.x  }}", {"x": "v"}, "/p")
         assert result == "v"
 
+    # --- Pass 2: bare input references inside complex expressions ---
+
+    def test_bare_input_in_complex_expression(self):
+        result = mod.replace_expressions(
+            "${{ inputs.enabled == 'true' && inputs.name || '' }}",
+            {"enabled": "true", "name": "myapp"},
+            "/p",
+        )
+        assert result == "${{ 'true' == 'true' && 'myapp' || '' }}"
+
+    def test_bare_input_with_expression_value(self):
+        result = mod.replace_expressions(
+            "${{ inputs.ref == 'main' && inputs.tag || 'latest' }}",
+            {"ref": "${{ github.ref }}", "tag": "v1"},
+            "/p",
+        )
+        assert result == "${{ github.ref == 'main' && 'v1' || 'latest' }}"
+
+    def test_bare_input_with_format_function(self):
+        result = mod.replace_expressions(
+            "${{ format('{0}/{1}', inputs.registry, inputs.image) }}",
+            {"registry": "ghcr.io", "image": "myapp"},
+            "/p",
+        )
+        assert result == "${{ format('{0}/{1}', 'ghcr.io', 'myapp') }}"
+
+    def test_bare_input_mixed_with_standalone(self):
+        result = mod.replace_expressions(
+            "${{ inputs.a }} and ${{ inputs.b == 'true' && inputs.c || '' }}",
+            {"a": "hello", "b": "true", "c": "world"},
+            "/p",
+        )
+        assert result == "hello and ${{ 'true' == 'true' && 'world' || '' }}"
+
+    def test_bare_input_value_with_single_quotes(self):
+        result = mod.replace_expressions(
+            "${{ inputs.msg == 'yes' }}",
+            {"msg": "it's"},
+            "/p",
+        )
+        assert result == "${{ 'it''s' == 'yes' }}"
+
+    def test_bare_input_empty_value(self):
+        result = mod.replace_expressions(
+            "${{ inputs.x == '' }}",
+            {"x": ""},
+            "/p",
+        )
+        assert result == "${{ '' == '' }}"
+
+    def test_bare_github_action_path_in_complex_expr(self):
+        result = mod.replace_expressions(
+            "${{ env.GITHUB_ACTION_PATH != '' && format('{0}/script.sh', env.GITHUB_ACTION_PATH) }}",
+            {},
+            "./actions/my-action",
+        )
+        assert (
+            result
+            == "${{ './actions/my-action' != '' && format('{0}/script.sh', './actions/my-action') }}"
+        )
+
+    def test_unknown_bare_input_preserved_in_complex_expr(self):
+        result = mod.replace_expressions(
+            "${{ inputs.unknown == 'true' }}",
+            {},
+            "/p",
+        )
+        assert result == "${{ inputs.unknown == 'true' }}"
+
+
+class TestValueToExpr:
+    def test_plain_string(self):
+        assert mod._value_to_expr("hello") == "'hello'"
+
+    def test_expression_value(self):
+        assert mod._value_to_expr("${{ github.ref }}") == "github.ref"
+
+    def test_empty_string(self):
+        assert mod._value_to_expr("") == "''"
+
+    def test_string_with_single_quotes(self):
+        assert mod._value_to_expr("it's") == "'it''s'"
+
+    def test_expression_with_whitespace(self):
+        assert mod._value_to_expr("${{  github.sha  }}") == "github.sha"
+
+    def test_partial_expression_treated_as_literal(self):
+        assert (
+            mod._value_to_expr("prefix-${{ github.sha }}")
+            == "'prefix-${{ github.sha }}'"
+        )
+
 
 # ---------------------------------------------------------------------------
 # replace_expressions_in_value
