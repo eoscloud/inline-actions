@@ -1,0 +1,21 @@
+name: complex-output-expression-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: generate
+        id: gen
+        uses: ./actions/generator
+        with:
+          enabled: "true"
+          scheme: https
+          host: example.com
+      - name: use output
+        shell: bash
+        run: echo "URL is ${{ steps.gen.outputs.full_url }}"
