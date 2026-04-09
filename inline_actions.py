@@ -503,9 +503,15 @@ def replace_expressions_in_value(value, inputs: dict[str, str], action_path: str
 # Step ID mangling & output mapping
 # ---------------------------------------------------------------------------
 
-# Pattern matching ${{ steps.X.outputs.Y }} expressions
+# Pattern matching ${{ steps.X.outputs.Y }} expressions (standalone only)
 _STEP_OUTPUT_RE = re.compile(
     r"\$\{\{\s*steps\.([a-zA-Z_][\w-]*)\.outputs\.([a-zA-Z_][\w-]*)\s*\}\}"
+)
+
+# Pattern matching steps.X.outputs.Y references anywhere (including inside
+# complex expressions like ${{ cond && steps.X.outputs.Y || '' }})
+_BARE_STEP_OUTPUT_RE = re.compile(
+    r"steps\.([a-zA-Z_][\w-]*)\.outputs\.([a-zA-Z_][\w-]*)"
 )
 
 
@@ -531,7 +537,7 @@ def parse_output_mapping(action: dict, workflow_step_id: str) -> dict[str, str]:
         value = spec.get("value", "")
         if not isinstance(value, str):
             continue
-        m = _STEP_OUTPUT_RE.search(value)
+        m = _BARE_STEP_OUTPUT_RE.search(value)
         if m is None:
             print(
                 f"  warning: cannot parse output expression for '{output_name}': {value}",
@@ -626,7 +632,7 @@ def _rewrite_internal_refs(value: str, id_mapping: dict[str, str]) -> str:
             )
         return m.group(0)
 
-    result = _STEP_OUTPUT_RE.sub(replace_match, str(value))
+    result = _BARE_STEP_OUTPUT_RE.sub(replace_match, str(value))
 
     if isinstance(value, FoldedScalarString):
         return FoldedScalarString(result)
@@ -650,7 +656,7 @@ def rewrite_step_output_refs(value: str, mapping: dict[str, str]) -> str:
             return m.group(0).replace(ref, mapping[ref])
         return m.group(0)
 
-    result = _STEP_OUTPUT_RE.sub(replace_match, str(value))
+    result = _BARE_STEP_OUTPUT_RE.sub(replace_match, str(value))
 
     if isinstance(value, FoldedScalarString):
         return FoldedScalarString(result)

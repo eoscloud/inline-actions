@@ -549,6 +549,21 @@ class TestParseOutputMapping:
         assert result == {}
         assert "warning: cannot parse output expression" in capsys.readouterr().err
 
+    def test_complex_expression_with_embedded_step_ref(self):
+        """Step refs embedded in complex expressions (ternary, format, etc.) are parsed."""
+        action = {
+            "outputs": {
+                "full_url": {
+                    "value": "${{ inputs.enabled == 'true' && format('{0}://{1}/{2}', inputs.scheme, inputs.host, steps.meta.outputs.path) || '' }}",
+                },
+            }
+        }
+        result = mod.parse_output_mapping(action, "build")
+        assert result == {
+            "steps.build.outputs.full_url": "steps.build--meta.outputs.path",
+            "steps.build.outputs.path": "steps.build--meta.outputs.path",
+        }
+
     def test_maps_internal_output_name_when_different(self):
         """When declared name != internal output name, both are mapped."""
         action = {
@@ -682,6 +697,21 @@ class TestMangleStepIds:
         assert isinstance(result[1]["run"], SingleQuotedScalarString)
         assert "steps.pfx--a.outputs.url" in str(result[1]["run"])
 
+    def test_rewrites_embedded_refs_in_complex_expressions(self):
+        """Step refs inside complex ${{ }} expressions are mangled."""
+        steps = [
+            {"id": "meta", "run": "echo version=1.0 >> $GITHUB_OUTPUT"},
+            {
+                "id": "b",
+                "run": "echo ${{ inputs.flag == 'true' && steps.meta.outputs.version || '' }}",
+            },
+        ]
+        result = mod.mangle_step_ids(steps, "pfx")
+        assert (
+            result[1]["run"]
+            == "echo ${{ inputs.flag == 'true' && steps.pfx--meta.outputs.version || '' }}"
+        )
+
     def test_non_string_values_passthrough(self):
         steps = [
             {"id": "a", "timeout": 30, "continue-on-error": True},
@@ -725,6 +755,18 @@ class TestRewriteStepOutputRefs:
         value = SingleQuotedScalarString("${{ steps.build.outputs.url }}")
         result = mod.rewrite_step_output_refs(value, mapping)
         assert isinstance(result, SingleQuotedScalarString)
+
+    def test_rewrites_embedded_ref_in_complex_expression(self):
+        """Step refs inside complex expressions are rewritten."""
+        mapping = {"steps.build.outputs.url": "steps.build--internal.outputs.url"}
+        result = mod.rewrite_step_output_refs(
+            "${{ inputs.flag == 'true' && steps.build.outputs.url || '' }}",
+            mapping,
+        )
+        assert (
+            result
+            == "${{ inputs.flag == 'true' && steps.build--internal.outputs.url || '' }}"
+        )
 
     def test_multiple_refs_in_one_string(self):
         mapping = {

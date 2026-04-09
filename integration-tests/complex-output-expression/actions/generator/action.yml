@@ -1,0 +1,23 @@
+name: generator
+description: Generates a URL from inputs and a computed path
+inputs:
+  enabled:
+    description: Whether to produce the URL
+    required: true
+  scheme:
+    description: URL scheme
+    required: true
+  host:
+    description: URL host
+    required: true
+outputs:
+  full_url:
+    description: Fully constructed URL
+    value: ${{ inputs.enabled == 'true' && format('{0}://{1}/{2}', inputs.scheme, inputs.host, steps.meta.outputs.path) || '' }}
+runs:
+  using: composite
+  steps:
+    - name: compute path
+      id: meta
+      shell: bash
+      run: echo "path=items/latest" >> "$GITHUB_OUTPUT"
