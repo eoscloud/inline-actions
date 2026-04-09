@@ -473,6 +473,25 @@ def replace_expressions(value: str, inputs: dict[str, str], action_path: str) ->
         result,
     )
 
+    # Pass 2: replace bare inputs.X / env.GITHUB_ACTION_PATH inside complex
+    # expressions (e.g. ${{ inputs.x == 'true' && inputs.y || '' }}).
+    action_path_expr = _value_to_expr(action_path)
+
+    def _replace_expr_block(block_match: re.Match) -> str:
+        block = block_match.group(0)
+
+        def _replace_bare_input(m: re.Match) -> str:
+            name = m.group(1)
+            if name in inputs:
+                return _value_to_expr(inputs[name])
+            return m.group(0)
+
+        block = _BARE_INPUT_RE.sub(_replace_bare_input, block)
+        block = _BARE_GITHUB_ACTION_PATH_RE.sub(action_path_expr, block)
+        return block
+
+    result = re.sub(r"\$\{\{.*?\}\}", _replace_expr_block, result)
+
     # Preserve the scalar string style from ruamel.yaml
     if isinstance(value, FoldedScalarString):
         return FoldedScalarString(result)
@@ -502,6 +521,27 @@ def replace_expressions_in_value(value, inputs: dict[str, str], action_path: str
 # ---------------------------------------------------------------------------
 # Step ID mangling & output mapping
 # ---------------------------------------------------------------------------
+
+# Pattern matching bare inputs.X references (for complex expressions)
+_BARE_INPUT_RE = re.compile(r"inputs\.(\w+)")
+
+# Pattern matching bare env.GITHUB_ACTION_PATH references (for complex expressions)
+_BARE_GITHUB_ACTION_PATH_RE = re.compile(r"env\.GITHUB_ACTION_PATH")
+
+
+def _value_to_expr(value: str) -> str:
+    """Convert a resolved input value to its GitHub Actions expression-context form.
+
+    If the value is a pure expression like ``${{ expr }}``, return the inner
+    ``expr``.  Otherwise return the value as a single-quoted string literal,
+    escaping embedded single quotes by doubling them (GHA expression syntax).
+    """
+    m = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", value)
+    if m:
+        return m.group(1)
+    escaped = value.replace("'", "''")
+    return f"'{escaped}'"
+
 
 # Pattern matching ${{ steps.X.outputs.Y }} expressions (standalone only)
 _STEP_OUTPUT_RE = re.compile(
