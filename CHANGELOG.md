@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/eoscloud/inline-actions/compare/v1.2.3...v1.2.4) (2026-04-09)
+
+
+### Bug Fixes
+
+* replace input references inside complex expressions ([#24](https://github.com/eoscloud/inline-actions/issues/24)) ([e189013](https://github.com/eoscloud/inline-actions/commit/e189013852d2aca9582ade30a847bf1f0953a172))
+
 ## [1.2.3](https://github.com/eoscloud/inline-actions/compare/v1.2.2...v1.2.3) (2026-04-09)
 
 
