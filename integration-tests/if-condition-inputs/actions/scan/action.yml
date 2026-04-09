@@ -1,0 +1,23 @@
+name: scan
+description: Action with inputs referenced in if conditions
+inputs:
+  image_ref:
+    description: Image reference to scan
+    required: true
+  enabled:
+    description: Whether scanning is enabled
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: run scan
+      shell: bash
+      run: echo "scanning ${{ inputs.image_ref }}"
+    - name: cleanup
+      if: always() && inputs.image_ref != ''
+      shell: bash
+      run: echo "cleaning up ${{ inputs.image_ref }}"
+    - name: notify
+      if: inputs.enabled == 'true'
+      shell: bash
+      run: echo "notifying"

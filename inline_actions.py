@@ -455,8 +455,19 @@ def resolve_inputs(action: dict, with_values: dict | None) -> dict[str, str]:
     return resolved
 
 
-def replace_expressions(value: str, inputs: dict[str, str], action_path: str) -> str:
+def replace_expressions(
+    value: str,
+    inputs: dict[str, str],
+    action_path: str,
+    *,
+    implicit_expression: bool = False,
+) -> str:
     """Replace ${{ inputs.X }} and ${{ env.GITHUB_ACTION_PATH }} in a string.
+
+    When *implicit_expression* is True the entire value is treated as a bare
+    expression (like GitHub Actions ``if:`` conditions) and ``inputs.X`` /
+    ``env.GITHUB_ACTION_PATH`` references are replaced even when they are not
+    wrapped in ``${{ }}``.
 
     Preserves ruamel.yaml scalar string types (FoldedScalarString, etc.).
     """
@@ -477,20 +488,25 @@ def replace_expressions(value: str, inputs: dict[str, str], action_path: str) ->
     # expressions (e.g. ${{ inputs.x == 'true' && inputs.y || '' }}).
     action_path_expr = _value_to_expr(action_path)
 
+    def _replace_bare_input(m: re.Match) -> str:
+        name = m.group(1)
+        if name in inputs:
+            return _value_to_expr(inputs[name])
+        return m.group(0)
+
     def _replace_expr_block(block_match: re.Match) -> str:
         block = block_match.group(0)
-
-        def _replace_bare_input(m: re.Match) -> str:
-            name = m.group(1)
-            if name in inputs:
-                return _value_to_expr(inputs[name])
-            return m.group(0)
-
         block = _BARE_INPUT_RE.sub(_replace_bare_input, block)
         block = _BARE_GITHUB_ACTION_PATH_RE.sub(action_path_expr, block)
         return block
 
     result = re.sub(r"\$\{\{.*?\}\}", _replace_expr_block, result)
+
+    # Pass 3: for implicit expression contexts (e.g. `if:` conditions) replace
+    # bare inputs.X / env.GITHUB_ACTION_PATH outside of ${{ }} blocks as well.
+    if implicit_expression:
+        result = _BARE_INPUT_RE.sub(_replace_bare_input, result)
+        result = _BARE_GITHUB_ACTION_PATH_RE.sub(action_path_expr, result)
 
     # Preserve the scalar string style from ruamel.yaml
     if isinstance(value, FoldedScalarString):
@@ -502,10 +518,18 @@ def replace_expressions(value: str, inputs: dict[str, str], action_path: str) ->
     return result
 
 
-def replace_expressions_in_value(value, inputs: dict[str, str], action_path: str):
+def replace_expressions_in_value(
+    value,
+    inputs: dict[str, str],
+    action_path: str,
+    *,
+    implicit_expression: bool = False,
+):
     """Recursively replace expressions in a YAML value (str, dict, list)."""
     if isinstance(value, str):
-        return replace_expressions(value, inputs, action_path)
+        return replace_expressions(
+            value, inputs, action_path, implicit_expression=implicit_expression
+        )
     if isinstance(value, dict):
         return {
             k: replace_expressions_in_value(v, inputs, action_path)
@@ -743,6 +767,9 @@ def inline_composite_steps(
                 new_step[key],
                 inputs,
                 workspace_rel_path,
+                # GitHub Actions treats `if:` values as implicit expressions,
+                # so bare inputs.X references must be replaced there too.
+                implicit_expression=(key == "if"),
             )
         inlined.append(new_step)
 
