@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.5](https://github.com/eoscloud/inline-actions/compare/v1.2.4...v1.2.5) (2026-04-09)
+
+
+### Bug Fixes
+
+* replace input references in implicit expression contexts ([#26](https://github.com/eoscloud/inline-actions/issues/26)) ([9f3489c](https://github.com/eoscloud/inline-actions/commit/9f3489c9f5536f509a7c6685b4ccb1b5e36ace93))
+
 ## [1.2.4](https://github.com/eoscloud/inline-actions/compare/v1.2.3...v1.2.4) (2026-04-09)
 
 
