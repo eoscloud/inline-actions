@@ -374,6 +374,53 @@ class TestReplaceExpressions:
         )
         assert result == "${{ inputs.unknown == 'true' }}"
 
+    def test_implicit_expression_replaces_bare_inputs(self):
+        """GitHub Actions `if:` conditions are implicit expressions."""
+        result = mod.replace_expressions(
+            "always() && inputs.image_ref != ''",
+            {"image_ref": "${{ steps.build.outputs.ref }}"},
+            "/p",
+            implicit_expression=True,
+        )
+        assert result == "always() && steps.build.outputs.ref != ''"
+
+    def test_implicit_expression_replaces_plain_value(self):
+        result = mod.replace_expressions(
+            "inputs.enabled == 'true'",
+            {"enabled": "true"},
+            "/p",
+            implicit_expression=True,
+        )
+        assert result == "'true' == 'true'"
+
+    def test_implicit_expression_preserves_unknown_inputs(self):
+        result = mod.replace_expressions(
+            "inputs.unknown == 'true'",
+            {},
+            "/p",
+            implicit_expression=True,
+        )
+        assert result == "inputs.unknown == 'true'"
+
+    def test_implicit_expression_replaces_github_action_path(self):
+        result = mod.replace_expressions(
+            "env.GITHUB_ACTION_PATH != ''",
+            {},
+            "./actions/my-action",
+            implicit_expression=True,
+        )
+        assert result == "'./actions/my-action' != ''"
+
+    def test_implicit_expression_false_does_not_replace_bare(self):
+        """Without implicit_expression, bare inputs outside ${{ }} are untouched."""
+        result = mod.replace_expressions(
+            "always() && inputs.image_ref != ''",
+            {"image_ref": "some-ref"},
+            "/p",
+            implicit_expression=False,
+        )
+        assert result == "always() && inputs.image_ref != ''"
+
 
 class TestValueToExpr:
     def test_plain_string(self):
@@ -545,6 +592,35 @@ class TestInlineCompositeSteps:
         step = {"uses": "./a"}
         result, mapping = mod.inline_composite_steps(action, step, "/p")
         assert result[0]["run"] == "echo fallback"
+
+    def test_if_condition_bare_inputs_replaced(self):
+        """if: conditions are implicit expressions — bare inputs.X must be substituted."""
+        action = self._make_action(
+            [
+                {
+                    "name": "cleanup",
+                    "if": "always() && inputs.image_ref != ''",
+                    "run": "echo ${{ inputs.image_ref }}",
+                }
+            ],
+            inputs={"image_ref": {"required": True}},
+        )
+        step = {
+            "uses": "./a",
+            "with": {"image_ref": "${{ steps.build.outputs.ref }}"},
+        }
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
+        assert result[0]["if"] == "always() && steps.build.outputs.ref != ''"
+        assert result[0]["run"] == "echo ${{ steps.build.outputs.ref }}"
+
+    def test_if_condition_plain_value_replaced(self):
+        action = self._make_action(
+            [{"name": "s1", "if": "inputs.enabled == 'true'", "run": "echo go"}],
+            inputs={"enabled": {"default": "false"}},
+        )
+        step = {"uses": "./a", "with": {"enabled": "true"}}
+        result, mapping = mod.inline_composite_steps(action, step, "/p")
+        assert result[0]["if"] == "'true' == 'true'"
 
     def test_mangles_ids_when_step_has_id(self):
         action = self._make_action(

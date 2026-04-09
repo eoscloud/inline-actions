@@ -1,0 +1,16 @@
+name: if-condition-inputs-test
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: scan image
+        uses: ./actions/scan
+        with:
+          image_ref: ${{ steps.build.outputs.ref }}
+          enabled: 'true'
