@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/eoscloud/inline-actions/compare/v1.2.2...v1.2.3) (2026-04-09)
+
+
+### Bug Fixes
+
+* parse step output references in complex expressions ([#22](https://github.com/eoscloud/inline-actions/issues/22)) ([5cfe1f6](https://github.com/eoscloud/inline-actions/commit/5cfe1f6706a62ff847997dc93c9614d559158954))
+
 ## [1.2.2](https://github.com/eoscloud/inline-actions/compare/v1.2.1...v1.2.2) (2026-03-16)
 
 
