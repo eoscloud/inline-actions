@@ -1383,6 +1383,126 @@ class TestResolveRemoteAction:
             tracker.entries["github.com/owner/repo@v1"]["revision"] == "fresh_sha_abc"
         )
 
+    def test_frozen_reuses_vendored_copy(self, tmp_path):
+        inline_actions_dir = str(tmp_path / "inline-actions")
+        vendored = tmp_path / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        vendored.mkdir(parents=True)
+        (vendored / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": str(vendored),
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=inline_actions_dir,
+            locked_entries=locked,
+        )
+        assert result is not None
+        assert result[0] == vendored
+        resolver.resolve.assert_not_called()
+        resolver.register_existing.assert_called_once()
+        assert tracker.entries["github.com/owner/repo@v1"]["revision"] == "locked_sha"
+
+    def test_frozen_reuses_vendored_action_yaml(self, tmp_path):
+        inline_actions_dir = str(tmp_path / "inline-actions")
+        vendored = tmp_path / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        vendored.mkdir(parents=True)
+        (vendored / "action.yaml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": str(vendored),
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=inline_actions_dir,
+            locked_entries=locked,
+        )
+        assert result is not None
+        resolver.resolve.assert_not_called()
+
+    def test_frozen_reuses_vendored_with_subpath(self, tmp_path):
+        inline_actions_dir = str(tmp_path / "inline-actions")
+        vendored_base = tmp_path / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        vendored_sub = vendored_base / "sub" / "action"
+        vendored_sub.mkdir(parents=True)
+        (vendored_sub / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": str(vendored_base),
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo/sub/action@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=inline_actions_dir,
+            locked_entries=locked,
+        )
+        assert result is not None
+        assert result[0] == vendored_sub
+        assert "sub/action" in result[1]
+        resolver.resolve.assert_not_called()
+
+    def test_frozen_falls_through_when_no_vendored_copy(self, tmp_path):
+        inline_actions_dir = str(tmp_path / "inline-actions")
+
+        action_dir = tmp_path / "cloned"
+        action_dir.mkdir()
+        (action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = action_dir
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": str(
+                    tmp_path / "inline-actions" / "github.com/owner/repo@v1"
+                ),
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=inline_actions_dir,
+            locked_entries=locked,
+        )
+        assert result is not None
+        resolver.resolve.assert_called_once_with(
+            "https://github.com/owner/repo", "", "v1", "locked_sha"
+        )
+
     def test_fresh_revision_none_exits(self, tmp_path):
         """When get_head_revision returns None the lock file would lack a
         revision, breaking a later --frozen run.  The code must abort."""
@@ -1691,6 +1811,29 @@ class TestGitActionResolver:
         resolver = mod.GitActionResolver(Path("/tmp"))
         assert resolver.get_head_revision("https://github.com/a/b", "v1") is None
 
+    def test_register_existing_success(self, tmp_path):
+        existing = tmp_path / "vendored"
+        existing.mkdir()
+        resolver = mod.GitActionResolver(tmp_path)
+        assert resolver.register_existing("https://github.com/a/b", "v1", existing)
+        assert resolver._cloned[("https://github.com/a/b", "v1")] == existing
+
+    def test_register_existing_missing_path(self, tmp_path):
+        resolver = mod.GitActionResolver(tmp_path)
+        assert not resolver.register_existing(
+            "https://github.com/a/b", "v1", tmp_path / "nonexistent"
+        )
+        assert ("https://github.com/a/b", "v1") not in resolver._cloned
+
+    def test_register_existing_enables_resolve_without_clone(self, tmp_path):
+        existing = tmp_path / "vendored"
+        existing.mkdir()
+        (existing / "action.yml").write_text("name: test\n")
+        resolver = mod.GitActionResolver(tmp_path)
+        resolver.register_existing("https://github.com/a/b", "v1", existing)
+        result = resolver.resolve("https://github.com/a/b", "", "v1")
+        assert result == existing
+
 
 # ---------------------------------------------------------------------------
 # vendor_actions
@@ -1730,6 +1873,23 @@ class TestVendorActions:
         tracker.record("https://github.com/a/b", "v1", "/some/path")
         mod.vendor_actions(resolver, tracker)
         assert "warning" in capsys.readouterr().err
+
+    def test_reuses_vendored_in_place(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        vendored = tmp_path / "vendor" / "a"
+        vendored.mkdir(parents=True)
+        (vendored / "action.yml").write_text("name: test\n")
+
+        resolver = mod.GitActionResolver(tmp_path / "cache")
+        resolver._cloned[("https://github.com/a/b", "v1")] = vendored
+
+        tracker = mod.RemoteActionTracker()
+        tracker.record("https://github.com/a/b", "v1", str(vendored))
+
+        mod.vendor_actions(resolver, tracker)
+
+        assert (vendored / "action.yml").exists()
+        assert "reusing vendored" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

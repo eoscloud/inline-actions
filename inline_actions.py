@@ -147,6 +147,12 @@ class GitActionResolver:
             return result.stdout.strip()
         return None
 
+    def register_existing(self, repo_url: str, ref: str, path: Path) -> bool:
+        if not path.exists():
+            return False
+        self._cloned[(repo_url, ref)] = path
+        return True
+
     def _ensure_cloned(
         self, repo_url: str, ref: str, revision: str | None = None
     ) -> Path:
@@ -400,11 +406,23 @@ def resolve_remote_action(
             )
             sys.exit(1)
 
+    # Derive workspace-relative checkout path from repo URL + ref
+    checkout_base = f"{inline_actions_dir}/{identifier}"
+    workspace_path = f"{checkout_base}/{subpath}" if subpath else checkout_base
+
+    if revision is not None:
+        vendored_base = Path(checkout_base)
+        vendored_action_dir = vendored_base / subpath if subpath else vendored_base
+        for name in ("action.yml", "action.yaml"):
+            if (vendored_action_dir / name).is_file():
+                git_resolver.register_existing(repo_url, ref, vendored_base)
+                tracker.record(repo_url, ref, checkout_base, revision)
+                return vendored_action_dir, workspace_path
+
     action_dir = git_resolver.resolve(repo_url, subpath, ref, revision)
     if action_dir is None:
         return None
 
-    # If not frozen, resolve the fresh revision from the clone
     if revision is None:
         revision = git_resolver.get_head_revision(repo_url, ref)
         if revision is None:
@@ -414,10 +432,6 @@ def resolve_remote_action(
                 file=sys.stderr,
             )
             sys.exit(1)
-
-    # Derive workspace-relative checkout path from repo URL + ref
-    checkout_base = f"{inline_actions_dir}/{identifier}"
-    workspace_path = f"{checkout_base}/{subpath}" if subpath else checkout_base
 
     tracker.record(repo_url, ref, checkout_base, revision)
 
@@ -964,12 +978,14 @@ def vendor_actions(
             )
             continue
 
-        # Remove existing vendored copy and replace with fresh one
+        if clone_dir == checkout_path:
+            print(f"  reusing vendored {identifier}")
+            continue
+
         if checkout_path.exists():
             shutil.rmtree(checkout_path)
         checkout_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy the clone, excluding the .git directory
         shutil.copytree(clone_dir, checkout_path, ignore=shutil.ignore_patterns(".git"))
         print(f"  vendored {identifier} -> {checkout_path}")
 
