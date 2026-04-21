@@ -145,7 +145,11 @@ The same repo may appear multiple times at different refs if different workflows
 
 #### Frozen mode
 
-Pass `--frozen` to clone at the **exact revision** recorded in the lock file instead of whatever the ref (e.g. `v3`) currently points to. This guarantees reproducible builds — the vendored code and generated workflows will be identical across runs, even if the upstream tag has moved.
+Pass `--frozen` to use the **exact revision** recorded in the lock file instead of whatever the ref (e.g. `v3`) currently points to. This guarantees reproducible builds — the vendored code and generated workflows will be identical across runs, even if the upstream tag has moved.
+
+When vendored action sources already exist at their expected checkout paths (under `.github/inline-actions/`) and their revision marker matches the locked revision, `--frozen` reuses them directly **without any network access**. This makes frozen mode safe to use in CI environments that lack Git credentials for remote repositories.
+
+> **Important:** In frozen mode only the *existence* of the vendored directory and its revision marker are checked, not the actual file contents. If you manually modify vendored files without changing the revision marker, `--frozen` will silently use the modified versions. To restore correct vendored sources, run without `--frozen` to re-clone and re-vendor from the upstream repository.
 
 ```bash
 uvx --from git+https://github.com/eoscloud/inline-actions inline-actions --frozen
