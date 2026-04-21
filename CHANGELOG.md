@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.6](https://github.com/eoscloud/inline-actions/compare/v1.2.5...v1.2.6) (2026-04-21)
+
+
+### Bug Fixes
+
+* reuse vendored action sources in frozen mode to avoid network access ([9e1e08e](https://github.com/eoscloud/inline-actions/commit/9e1e08e81abd216f30aa842a99a500f22eaaeeaf))
+
 ## [1.2.5](https://github.com/eoscloud/inline-actions/compare/v1.2.4...v1.2.5) (2026-04-09)
 
 
