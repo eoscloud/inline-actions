@@ -1401,6 +1401,191 @@ class TestResolveRemoteAction:
             )
         assert exc_info.value.code == 1
 
+    def test_frozen_uses_vendored_path(self, tmp_path):
+        vendored_dir = (
+            tmp_path / ".github" / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        )
+        vendored_dir.mkdir(parents=True)
+        (vendored_dir / "action.yml").write_text("name: test\n")
+        (vendored_dir / ".inline-actions-revision").write_text("locked_sha\n")
+
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / ".github" / "inline-actions"),
+            locked_entries=locked,
+        )
+        assert result is not None
+        assert result[0] == vendored_dir
+        resolver.resolve.assert_not_called()
+        assert tracker.entries["github.com/owner/repo@v1"]["revision"] == "locked_sha"
+
+    def test_frozen_uses_vendored_path_with_subpath(self, tmp_path):
+        vendored_base = (
+            tmp_path / ".github" / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        )
+        vendored_base.mkdir(parents=True)
+        (vendored_base / ".inline-actions-revision").write_text("locked_sha\n")
+        subpath_dir = vendored_base / "actions" / "my-action"
+        subpath_dir.mkdir(parents=True)
+        (subpath_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo/actions/my-action@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / ".github" / "inline-actions"),
+            locked_entries=locked,
+        )
+        assert result is not None
+        assert result[0] == subpath_dir
+        resolver.resolve.assert_not_called()
+
+    def test_frozen_falls_back_when_not_vendored(self, tmp_path):
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = fake_action_dir
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / "nonexistent"),
+            locked_entries=locked,
+        )
+        assert result is not None
+        resolver.resolve.assert_called_once()
+
+    def test_frozen_falls_back_when_revision_mismatch(self, tmp_path):
+        vendored_dir = (
+            tmp_path / ".github" / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        )
+        vendored_dir.mkdir(parents=True)
+        (vendored_dir / "action.yml").write_text("name: test\n")
+        (vendored_dir / ".inline-actions-revision").write_text("old_sha\n")
+
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = fake_action_dir
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "new_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / ".github" / "inline-actions"),
+            locked_entries=locked,
+        )
+        assert result is not None
+        resolver.resolve.assert_called_once()
+
+    def test_frozen_falls_back_when_no_marker(self, tmp_path):
+        vendored_dir = (
+            tmp_path / ".github" / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        )
+        vendored_dir.mkdir(parents=True)
+        (vendored_dir / "action.yml").write_text("name: test\n")
+        # No .inline-actions-revision file written
+
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = fake_action_dir
+        tracker = mod.RemoteActionTracker()
+
+        locked = {
+            "github.com/owner/repo@v1": {
+                "url": "https://github.com/owner/repo",
+                "ref": "v1",
+                "checkout_path": ".github/inline-actions/github.com/owner/repo@v1",
+                "revision": "locked_sha",
+            }
+        }
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / ".github" / "inline-actions"),
+            locked_entries=locked,
+        )
+        assert result is not None
+        resolver.resolve.assert_called_once()
+
+    def test_non_frozen_ignores_vendored_path(self, tmp_path):
+        vendored_dir = (
+            tmp_path / ".github" / "inline-actions" / "github.com" / "owner" / "repo@v1"
+        )
+        vendored_dir.mkdir(parents=True)
+        (vendored_dir / "action.yml").write_text("name: test\n")
+        (vendored_dir / ".inline-actions-revision").write_text("some_sha\n")
+
+        fake_action_dir = tmp_path / "fake-clone"
+        fake_action_dir.mkdir()
+        (fake_action_dir / "action.yml").write_text("name: test\n")
+
+        resolver = MagicMock()
+        resolver.resolve.return_value = fake_action_dir
+        resolver.get_head_revision.return_value = "fresh_sha"
+        tracker = mod.RemoteActionTracker()
+
+        result = mod.resolve_remote_action(
+            "https://github.com/owner/repo@v1",
+            resolver,
+            tracker,
+            inline_actions_dir=str(tmp_path / ".github" / "inline-actions"),
+            locked_entries=None,
+        )
+        assert result is not None
+        resolver.resolve.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # write_metadata
@@ -1731,6 +1916,42 @@ class TestVendorActions:
         mod.vendor_actions(resolver, tracker)
         assert "warning" in capsys.readouterr().err
 
+    def test_writes_revision_marker(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        clone_dir = tmp_path / "cache" / "clone"
+        clone_dir.mkdir(parents=True)
+        (clone_dir / "action.yml").write_text("name: test\n")
+        (clone_dir / ".git").mkdir()
+        (clone_dir / ".git" / "config").write_text("gitconfig\n")
+
+        resolver = mod.GitActionResolver(tmp_path / "cache")
+        resolver._cloned[("https://github.com/a/b", "v1")] = clone_dir
+
+        tracker = mod.RemoteActionTracker()
+        tracker.record(
+            "https://github.com/a/b", "v1", str(tmp_path / "vendor" / "a"), "abc123"
+        )
+
+        mod.vendor_actions(resolver, tracker)
+
+        marker = tmp_path / "vendor" / "a" / ".inline-actions-revision"
+        assert marker.read_text() == "abc123\n"
+
+    def test_already_vendored_no_clone_skips_silently(self, tmp_path, capsys):
+        checkout_path = tmp_path / "vendor" / "a"
+        checkout_path.mkdir(parents=True)
+        (checkout_path / "action.yml").write_text("name: test\n")
+
+        resolver = mod.GitActionResolver(tmp_path / "cache")
+        # No entries in _cloned
+
+        tracker = mod.RemoteActionTracker()
+        tracker.record("https://github.com/a/b", "v1", str(checkout_path))
+
+        mod.vendor_actions(resolver, tracker)
+
+        assert "warning" not in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # print_no_vendor_notice
@@ -2057,3 +2278,73 @@ class TestMain:
                 )
             assert exc_info.value.code == 1
             assert "not found in lock file" in capsys.readouterr().err
+
+    def test_frozen_end_to_end_uses_vendored_no_clone(self, tmp_path):
+        """In frozen mode, if vendored sources are present with a matching
+        revision marker, no git clone should be performed at all."""
+        source_dir = tmp_path / "sources"
+        source_dir.mkdir()
+        output_dir = tmp_path / ".github" / "workflows"
+        output_dir.mkdir(parents=True)
+        inline_dir = tmp_path / ".github" / "inline-actions"
+        inline_dir.mkdir(parents=True)
+
+        # Write the lock file
+        (inline_dir / "actions.yaml").write_text(
+            textwrap.dedent("""\
+            github.com/owner/repo@v1:
+              url: https://github.com/owner/repo
+              ref: v1
+              checkout_path: .github/inline-actions/github.com/owner/repo@v1
+              revision: abc123deadbeef
+        """)
+        )
+
+        # Create the vendored action with a matching revision marker
+        vendored_dir = inline_dir / "github.com" / "owner" / "repo@v1"
+        vendored_dir.mkdir(parents=True)
+        (vendored_dir / "action.yml").write_text(
+            textwrap.dedent("""\
+            name: test
+            runs:
+              using: composite
+              steps:
+                - name: hello
+                  run: echo hello
+        """)
+        )
+        (vendored_dir / ".inline-actions-revision").write_text("abc123deadbeef\n")
+
+        # Create a workflow referencing the remote action
+        (source_dir / "ci.yaml").write_text(
+            textwrap.dedent("""\
+            name: CI
+            on: push
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: my-step
+                    uses: https://github.com/owner/repo@v1
+        """)
+        )
+
+        with (
+            patch.object(mod.GitActionResolver, "_clone_at_revision") as mock_clone_rev,
+            patch.object(mod.GitActionResolver, "_clone_at_ref") as mock_clone_ref,
+        ):
+            mod.main(
+                [
+                    "--source-dir",
+                    str(source_dir),
+                    "--output-dir",
+                    str(output_dir),
+                    "--frozen",
+                ]
+            )
+            mock_clone_rev.assert_not_called()
+            mock_clone_ref.assert_not_called()
+
+        output_file = output_dir / "ci.yaml"
+        assert output_file.exists()
+        assert "echo hello" in output_file.read_text()

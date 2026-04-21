@@ -400,6 +400,21 @@ def resolve_remote_action(
             )
             sys.exit(1)
 
+    # In frozen mode, prefer already-vendored sources to avoid network access,
+    # but only if the vendored revision matches the locked revision.
+    if revision is not None:
+        checkout_base = f"{inline_actions_dir}/{identifier}"
+        candidate = Path(checkout_base) / subpath if subpath else Path(checkout_base)
+        marker = Path(checkout_base) / ".inline-actions-revision"
+        if marker.is_file() and marker.read_text().strip() == revision:
+            for name in ("action.yml", "action.yaml"):
+                if (candidate / name).is_file():
+                    workspace_path = (
+                        f"{checkout_base}/{subpath}" if subpath else checkout_base
+                    )
+                    tracker.record(repo_url, ref, checkout_base, revision)
+                    return candidate, workspace_path
+
     action_dir = git_resolver.resolve(repo_url, subpath, ref, revision)
     if action_dir is None:
         return None
@@ -958,6 +973,8 @@ def vendor_actions(
         key = (repo_url, ref)
         clone_dir = git_resolver._cloned.get(key)
         if clone_dir is None:
+            if checkout_path.exists():
+                continue  # already vendored (e.g. frozen mode)
             print(
                 f"  warning: no cached clone for {identifier}, skipping vendor",
                 file=sys.stderr,
@@ -971,6 +988,10 @@ def vendor_actions(
 
         # Copy the clone, excluding the .git directory
         shutil.copytree(clone_dir, checkout_path, ignore=shutil.ignore_patterns(".git"))
+        # Record which revision was vendored so frozen mode can verify
+        revision = entry.get("revision")
+        if revision:
+            (checkout_path / ".inline-actions-revision").write_text(revision + "\n")
         print(f"  vendored {identifier} -> {checkout_path}")
 
 
