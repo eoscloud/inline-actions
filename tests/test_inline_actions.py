@@ -271,6 +271,20 @@ class TestReplaceExpressions:
         result = mod.replace_expressions("${{ inputs.unknown }}", {}, "/action")
         assert result == "${{ inputs.unknown }}"
 
+    def test_hyphenated_input_name(self):
+        result = mod.replace_expressions(
+            "${{ inputs.ftp-password }}", {"ftp-password": "s3cret"}, "/action"
+        )
+        assert result == "s3cret"
+
+    def test_hyphenated_input_in_complex_expression(self):
+        result = mod.replace_expressions(
+            "${{ inputs.cask-name == 'eos' && inputs.archive-url || '' }}",
+            {"cask-name": "eos", "archive-url": "https://example/"},
+            "/action",
+        )
+        assert result == "${{ 'eos' == 'eos' && 'https://example/' || '' }}"
+
     def test_other_expressions_preserved(self):
         result = mod.replace_expressions(
             "${{ github.sha }} ${{ secrets.TOKEN }}", {}, "/action"
