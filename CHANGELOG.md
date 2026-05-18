@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.7](https://github.com/eoscloud/inline-actions/compare/v1.2.6...v1.2.7) (2026-05-18)
+
+
+### Bug Fixes
+
+* allow hyphens in inputs.X references ([109f840](https://github.com/eoscloud/inline-actions/commit/109f840a923ced88cf1adafeb5517e31096283b2))
+
 ## [1.2.6](https://github.com/eoscloud/inline-actions/compare/v1.2.5...v1.2.6) (2026-04-21)
 
 
