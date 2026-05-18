@@ -492,7 +492,7 @@ def replace_expressions(
         name = match.group(1)
         return inputs.get(name, match.group(0))
 
-    result = re.sub(r"\$\{\{\s*inputs\.(\w+)\s*\}\}", replace_input, str(value))
+    result = re.sub(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}", replace_input, str(value))
     result = re.sub(
         r"\$\{\{\s*env\.GITHUB_ACTION_PATH\s*\}\}",
         action_path,
@@ -562,7 +562,7 @@ def replace_expressions_in_value(
 # ---------------------------------------------------------------------------
 
 # Pattern matching bare inputs.X references (for complex expressions)
-_BARE_INPUT_RE = re.compile(r"inputs\.(\w+)")
+_BARE_INPUT_RE = re.compile(r"inputs\.([\w-]+)")
 
 # Pattern matching bare env.GITHUB_ACTION_PATH references (for complex expressions)
 _BARE_GITHUB_ACTION_PATH_RE = re.compile(r"env\.GITHUB_ACTION_PATH")
